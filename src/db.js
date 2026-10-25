@@ -45,6 +45,26 @@ CREATE TABLE IF NOT EXISTS spectra (
   UNIQUE (compound_id, nucleus, kind, source, source_id, frequency)
 );
 CREATE INDEX IF NOT EXISTS spectra_compound ON spectra(compound_id);
+CREATE TABLE IF NOT EXISTS prediction_cache (
+  idcode TEXT PRIMARY KEY,
+  proton TEXT,
+  carbon TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS uploads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  nucleus TEXT NOT NULL,
+  frequency REAL,
+  solvent TEXT,
+  formula TEXT,
+  raw TEXT,
+  peaks TEXT,
+  analysis TEXT,
+  candidates TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS searches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   mode TEXT NOT NULL,
@@ -210,6 +230,63 @@ export function deleteCompound(id) {
 
 export function deleteSpectrum(id) {
   return db.prepare('DELETE FROM spectra WHERE id = ?').run(id).changes;
+}
+
+// Caché persistente de predicciones simplificadas (señales agrupadas) para candidatos
+export function getCachedPrediction(idcode) {
+  const r = db.prepare('SELECT proton, carbon FROM prediction_cache WHERE idcode = ?').get(idcode);
+  return r ? { proton: p(r.proton), carbon: p(r.carbon) } : null;
+}
+export function setCachedPrediction(idcode, proton, carbon) {
+  db.prepare('INSERT OR REPLACE INTO prediction_cache (idcode, proton, carbon, created_at) VALUES (?, ?, ?, ?)').run(idcode, j(proton), j(carbon), now());
+}
+
+// Espectros cargados por el usuario (CSV)
+export function saveUpload(u) {
+  const t = now();
+  const info = db
+    .prepare(
+      `INSERT INTO uploads (name, nucleus, frequency, solvent, formula, raw, peaks, analysis, candidates, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(u.name ?? null, u.nucleus, u.frequency ?? null, u.solvent ?? null, u.formula ?? null, u.raw ?? null, j(u.peaks), j(u.analysis), j(u.candidates), t, t);
+  return Number(info.lastInsertRowid);
+}
+export function updateUpload(id, fields) {
+  const t = now();
+  db.prepare('UPDATE uploads SET analysis = ?, candidates = ?, formula = ?, updated_at = ? WHERE id = ?').run(
+    j(fields.analysis),
+    j(fields.candidates),
+    fields.formula ?? null,
+    t,
+    id,
+  );
+}
+export function getUpload(id) {
+  const r = db.prepare('SELECT * FROM uploads WHERE id = ?').get(id);
+  if (!r) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    nucleus: r.nucleus,
+    frequency: r.frequency,
+    solvent: r.solvent,
+    formula: r.formula,
+    raw: r.raw,
+    peaks: p(r.peaks),
+    analysis: p(r.analysis),
+    candidates: p(r.candidates),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+export function listUploads() {
+  return db
+    .prepare('SELECT id, name, nucleus, frequency, solvent, formula, created_at, updated_at FROM uploads ORDER BY updated_at DESC LIMIT 200')
+    .all();
+}
+export function deleteUpload(id) {
+  return db.prepare('DELETE FROM uploads WHERE id = ?').run(id).changes;
 }
 
 export function stats() {

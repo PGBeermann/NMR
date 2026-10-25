@@ -20,12 +20,26 @@ import { getCompoundSpectra, upsertCompound, upsertSpectrum } from '../db.js';
 const r2 = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 const predictionCache = new Map();
 
-async function runPrediction(mol) {
+export async function runPrediction(mol, { retries = 4 } = {}) {
   const key = mol.getIDCode();
   if (predictionCache.has(key)) return predictionCache.get(key);
+  // Reintentos con espera creciente si el servicio limita la frecuencia (HTTP 429)
+  const attempt = async () => {
+    for (let i = 0; ; i++) {
+      try {
+        return await predict(mol, { predictOptions: { H: {}, C: {} } });
+      } catch (e) {
+        if (i < retries && /Too Many Requests|429|ECONNRESET|fetch failed/i.test(e.message)) {
+          await new Promise((res) => setTimeout(res, 1500 * 2 ** i));
+          continue;
+        }
+        throw e;
+      }
+    }
+  };
   const p = Promise.race([
-    predict(mol, { predictOptions: { H: {}, C: {} } }),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('La predicción tardó demasiado')), 90000)),
+    attempt(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('La predicción tardó demasiado')), 120000)),
   ]);
   predictionCache.set(key, p);
   if (predictionCache.size > 100) predictionCache.delete(predictionCache.keys().next().value);

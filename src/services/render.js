@@ -31,6 +31,51 @@ export function defaultRange(s, xy) {
   return s.nucleus === '1H' ? { from: -0.5, to: 10 } : { from: -5, to: 220 };
 }
 
+/** Espectro cargado por el usuario (lista de picos CSV). */
+export function uploadXY(u) {
+  const isH = u.nucleus === '1H';
+  const ppms = u.peaks.map((p) => p.ppm);
+  const from = isH ? Math.floor(Math.min(0, ...ppms) - 0.5) : Math.floor(Math.min(0, ...ppms) - 5);
+  const to = isH ? Math.ceil(Math.max(9, ...ppms) + 0.8) : Math.ceil(Math.max(200, ...ppms) + 10);
+  const width = isH ? 0.9 / (u.frequency || 400) : 0.06;
+  return sticksToXY(u.peaks, { from, to, width, nbPoints: isH ? 131072 : 32768, cacheKey: `u-${u.id}-${u.updatedAt}` });
+}
+
+export function renderUpload(u, { from, to, width, height } = {}) {
+  const xy = uploadXY(u);
+  const isH = u.nucleus === '1H';
+  const sig = u.analysis?.signals || [];
+  let lo = Number.isFinite(from) ? from : xy.x[0];
+  let hi = Number.isFinite(to) ? to : xy.x[xy.x.length - 1];
+  if (lo > hi) [lo, hi] = [hi, lo];
+  if (hi - lo < 0.01) hi = lo + 0.01;
+  const heightAt = (a, b) => {
+    let m = 0;
+    for (let i = 0; i < xy.x.length; i++) if (xy.x[i] >= a && xy.x[i] <= b && xy.y[i] > m) m = xy.y[i];
+    return m;
+  };
+  const labels = isH
+    ? sig.map((g) => ({ ppm: g.delta, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.from - 0.002, g.to + 0.002) }))
+    : sig.map((g) => ({ ppm: g.delta, text: g.delta.toFixed(1), height: heightAt(g.delta - 0.2, g.delta + 0.2) }));
+  const integrals = isH ? sig.map((g) => ({ from: g.from - 0.004, to: g.to + 0.004, text: `${g.nH}H` })) : [];
+  return spectrumSvg({
+    width: width || 1100,
+    height: height || 500,
+    from: lo,
+    to: hi,
+    title: `${NUC[u.nucleus] || u.nucleus} RMN — ${u.name || 'Espectro cargado'}`,
+    subtitle: `Espectro experimental cargado (CSV) · ${u.peaks.length} picos${u.formula ? ` · ${u.formula}` : ''}`,
+    info: [u.frequency ? `${u.frequency} MHz` : null, u.solvent].filter(Boolean).join(' · '),
+    xy,
+    labels,
+    integrals,
+    integralCurve: isH ? { x: xy.x, y: cumulativeIntegral(xy) } : null,
+    marks: [{ ppm: 0, text: 'TMS' }],
+    color: '#b02a37',
+    footer: 'Analizador RMN',
+  });
+}
+
 export function renderSpectrum(s, compound, { from, to, width, height } = {}) {
   const xy = spectrumXY(s);
   const range = defaultRange(s, xy);

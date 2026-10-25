@@ -65,7 +65,10 @@ document.querySelectorAll('.tab').forEach((b) =>
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === b));
     document.querySelectorAll('.tabpanel').forEach((p) => p.classList.add('hidden'));
     $(`#tab-${b.dataset.tab}`).classList.remove('hidden');
-    if (b.dataset.tab === 'saved') loadSaved();
+    if (b.dataset.tab === 'saved') {
+      loadSaved();
+      loadUploads();
+    }
   }),
 );
 

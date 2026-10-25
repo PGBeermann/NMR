@@ -117,3 +117,19 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); padding: 20p
   main { padding: 12px 10px 30px; }
   .jsme-wrap { flex-basis: 100%; }
 }
+
+/* Modo 4: espectro CSV → candidatos */
+textarea { font: 13px/1.4 ui-monospace, Consolas, monospace; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 7px; resize: vertical; }
+label.check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; font-size: .9rem; }
+label.check input { margin-top: 3px; }
+.cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.cand { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #fff; display: flex; flex-direction: column; gap: 6px; }
+.cand .mol { display: flex; justify-content: center; min-height: 120px; }
+.cand .mol svg { max-width: 100%; height: auto; }
+.cand h4 { margin: 0; font-size: 1rem; }
+.cand .rank { font-size: .75rem; color: var(--muted); }
+.meter { height: 10px; border-radius: 6px; background: #edf0f5; overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: 6px; }
+.pct { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.breakdown { font-size: .78rem; color: var(--muted); }
+input.nh { width: 64px; padding: 3px 5px; }

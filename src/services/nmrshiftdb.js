@@ -97,6 +97,47 @@ export function findByFormula(formula) {
     });
 }
 
+// Índice en memoria de todas las señales por núcleo (para buscar por espectro).
+const spectraCache = {};
+
+function groupShifts(signals, nucleus) {
+  // 1H: cada entrada es un H (con el átomo pesado que lo porta) → nº de H por señal
+  const tol = nucleus === '1H' ? 0.015 : 0.05;
+  const sorted = [...signals].sort((a, b) => a.delta - b.delta);
+  const out = [];
+  for (const s of sorted) {
+    const g = out[out.length - 1];
+    if (g && s.delta - g.last <= tol) {
+      g.sum += s.delta;
+      g.n++;
+      g.last = s.delta;
+      if (s.atom !== null && s.atom !== undefined) g.atoms.add(s.atom);
+    } else out.push({ sum: s.delta, n: 1, last: s.delta, atoms: new Set(s.atom !== null && s.atom !== undefined ? [s.atom] : []) });
+  }
+  return out.map((g) => ({ delta: g.sum / g.n, n: g.n, atoms: [...g.atoms] }));
+}
+
+export function getAllSpectra(nucleus) {
+  if (spectraCache[nucleus]) return spectraCache[nucleus];
+  const d = open();
+  if (!d) return null;
+  const like = nucleus === '1H' ? '%"nucleus":"1H"%' : '%"nucleus":"13C"%';
+  const list = [];
+  for (const r of d.prepare('SELECT id, inchikey, formula, smiles, spectra FROM entries WHERE spectra LIKE ?').iterate(like)) {
+    const specs = JSON.parse(r.spectra)
+      .filter((s) => s.nucleus === nucleus && s.signals.length)
+      .map((s) => ({ calculated: s.calculated, solvent: s.solvent, field: s.field, signals: groupShifts(s.signals, nucleus) }));
+    if (specs.length) list.push({ id: r.id, inchikey: r.inchikey, formula: r.formula, smiles: r.smiles, spectra: specs });
+  }
+  spectraCache[nucleus] = list;
+  return list;
+}
+
+export function getMolfile(id) {
+  const d = open();
+  return d ? d.prepare('SELECT molfile FROM entries WHERE id = ?').get(id)?.molfile || null : null;
+}
+
 export function getEntry(id) {
   const d = open();
   if (!d) return null;

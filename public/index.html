@@ -38,6 +38,7 @@
       <button class="tab active" data-tab="draw" role="tab">1 · Dibujar estructura</button>
       <button class="tab" data-tab="formula" role="tab">2 · Fórmula molecular</button>
       <button class="tab" data-tab="name" role="tab">3 · Nombre IUPAC</button>
+      <button class="tab" data-tab="csv" role="tab">4 · Espectro (CSV) → estructura</button>
       <button class="tab" data-tab="saved" role="tab">Espectros guardados</button>
     </nav>
 
@@ -91,12 +92,52 @@
       <div id="nameResults"></div>
     </section>
 
+    <section class="panel tabpanel hidden" id="tab-csv">
+      <div class="row">
+        <div class="side" style="flex:2 1 420px">
+          <h3>Cargar la lista de picos</h3>
+          <p class="muted">Tabla con columnas <b>ppm</b> e <b>intensidad</b> (opcional una columna <b>Hz</b>: así se calcula la frecuencia del equipo). Separadores: coma, punto y coma, tabulador o espacios. Se puede pegar desde Excel o MestReNova.</p>
+          <label class="block">Archivo CSV / TXT
+            <input type="file" id="csvFile" accept=".csv,.txt,.tsv,.dat,text/csv,text/plain" />
+          </label>
+          <label class="block">o pegue la tabla aquí
+            <textarea id="csvText" rows="10" spellcheck="false" placeholder="Hz	ppm	Int.&#10;2901.98	7.262	581&#10;2901.00	7.259	227&#10;…"></textarea>
+          </label>
+        </div>
+        <div class="side">
+          <label class="block">Nombre de la muestra
+            <input id="csvName" placeholder="p. ej. Muestra 12 — fracción B" />
+          </label>
+          <label class="block">Núcleo
+            <select id="csvNucleus">
+              <option value="auto">Detectar automáticamente</option>
+              <option value="1H">¹H</option>
+              <option value="13C">¹³C</option>
+            </select>
+          </label>
+          <label class="block">Fórmula molecular (opcional, muy recomendable)
+            <input id="csvFormula" placeholder="p. ej. C6H6O" spellcheck="false" />
+          </label>
+          <label class="check"><input type="checkbox" id="csvExcludeSolvent" /> Excluir señales del disolvente/agua</label>
+          <label class="check"><input type="checkbox" id="csvRangeOnly" /> El espectro es parcial: comparar sólo en su rango de δ</label>
+          <p class="hint">Con la fórmula se reparten los H en las integrales y, además de NMRShiftDB2, se predicen los espectros de los compuestos de PubChem con esa fórmula.</p>
+          <div class="btns">
+            <button class="primary" id="btnCsv">Analizar espectro</button>
+            <button id="btnCsvExample">Cargar ejemplo</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel tabpanel hidden" id="tab-saved">
       <div class="searchbar">
         <input id="savedFilter" placeholder="Filtrar por nombre, fórmula o SMILES" />
         <button id="btnSavedRefresh">Actualizar</button>
       </div>
+      <h3>Compuestos analizados</h3>
       <div id="savedList"></div>
+      <h3>Espectros cargados (CSV)</h3>
+      <div id="uploadList"></div>
     </section>
 
     <div id="loading" class="loading hidden"><div class="spinner"></div><span id="loadingText">Analizando…</span></div>
@@ -112,5 +153,6 @@
     Editor: <a href="https://jsme-editor.github.io" target="_blank" rel="noopener">JSME</a>
   </footer>
   <script src="js/app.js"></script>
+  <script src="js/csv-mode.js"></script>
 </body>
 </html>

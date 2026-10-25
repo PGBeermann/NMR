@@ -55,6 +55,23 @@ export async function properties(cids) {
   return out;
 }
 
+export async function propertiesByInchikeys(keys) {
+  const out = [];
+  for (let i = 0; i < keys.length; i += 50) {
+    const chunk = keys.slice(i, i + 50);
+    const d = await fetchJson(`${B}/compound/inchikey/property/${PROPS}/JSON`, {
+      method: 'POST',
+      body: new URLSearchParams({ inchikey: chunk.join(',') }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      cacheKey: `ik:${chunk.join(',')}`,
+    });
+    for (const p of d?.PropertyTable?.Properties || []) {
+      out.push({ cid: p.CID, title: p.Title, iupac: p.IUPACName, formula: p.MolecularFormula, inchikey: p.InChIKey });
+    }
+  }
+  return out;
+}
+
 export async function synonyms(cid, max = 12) {
   const d = await fetchJson(`${B}/compound/cid/${cid}/synonyms/JSON`);
   return (d?.InformationList?.Information?.[0]?.Synonym || []).slice(0, max);

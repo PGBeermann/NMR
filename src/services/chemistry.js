@@ -150,7 +150,7 @@ export function protonRegion(ppm) {
   if (ppm < 1.9) return 'H alifáticos (CH₃, CH₂, CH saturados)';
   if (ppm < 3.0) return 'H alílicos, bencílicos, en α a C=O o a N';
   if (ppm < 4.6) return 'H sobre carbono unido a O, N o halógeno';
-  if (ppm < 6.5) return 'H vinílicos (alquenos)';
+  if (ppm < 6.5) return 'H vinílicos (alquenos); un singlete aislado puede ser OH/NH intercambiable';
   if (ppm < 8.6) return 'H aromáticos / heteroaromáticos';
   if (ppm < 10.5) return 'H de aldehído o amida/NH desapantallado';
   return 'H ácidos (COOH, fenoles con puente de H, enoles)';

@@ -14,6 +14,13 @@ Aplicación web en **Node.js** para el análisis de espectros de **RMN-¹H** y *
 2. **Fórmula molecular**: lista **todos** los compuestos con esa fórmula en PubChem (nombre común, nombre IUPAC, SMILES, imagen) y marca los que tienen espectros asignados en NMRShiftDB2. Cualquiera se puede analizar con un clic.
 3. **Nombre IUPAC** (o común): se resuelve en PubChem; si no existe, el nombre sistemático se convierte en estructura con OPSIN. Luego se buscan y predicen los espectros.
 
+4. **Espectro experimental (CSV) → estructura**: se carga o pega una tabla de picos (`ppm` e intensidad; opcional una columna `Hz`, con la que se calcula la frecuencia del equipo). El programa:
+   - agrupa las líneas en multipletes, calcula su centro, la multiplicidad (fusionando la estructura fina < 2.5 Hz), las constantes **J** y la integración relativa (con la fórmula reparte el nº total de H; el usuario puede corregir los nH y recalcular);
+   - marca las señales del disolvente y propone **fragmentos estructurales** (benceno monosustituido, sustituyente donador/aceptor, OCH₃, acetilo, etilo, isopropilo, OH/NH…);
+   - busca **estructuras candidatas** en los ~17 600 espectros de ¹H (o ~58 000 de ¹³C) de NMRShiftDB2 y, si se indica la fórmula, predice los espectros de los compuestos de PubChem con esa fórmula;
+   - ordena los candidatos por **% de concordancia** = desplazamientos (±0.12 ppm) + cobertura de las señales del candidato + integración + nº de señales + **multiplicidad esperada por la regla n+1** (calculada desde la estructura), con reconocimiento de OH/NH intercambiables.
+   Ejemplo incluido: `public/examples/fenol-cdcl3-400MHz.tsv`.
+
 En **todos los casos** el análisis se **guarda automáticamente** en una base de datos SQLite (`data/nmr.db`): compuesto, señales, desplazamientos, intensidades, constantes de acoplamiento, integración, multiplicidad, asignación, disolvente, frecuencia, fuente y comparación. La pestaña **Espectros guardados** permite consultarlos, exportarlos y eliminarlos.
 
 ### Formatos de exportación
@@ -75,6 +82,9 @@ El repositorio incluye `Dockerfile` (y `docker-compose.yml` como alternativa).
 | GET | `/api/compounds` · `/api/compounds/:id` | Guardados |
 | GET | `/api/spectra/:id/image.svg|png?from=&to=` | Imagen del espectro (con zoom) |
 | GET | `/api/spectra/:id/export?format=jdx|jdx-peaks|csv|xy|json` | Exportación |
+| POST | `/api/spectrum/analyze` | `{csv, name, nucleus, frequency, solvent, formula, excludeSolvent, rangeOnly, integrals}` → multipletes, interpretación y candidatos (se guarda) |
+| GET | `/api/uploads` · `/api/uploads/:id` | Espectros CSV cargados |
+| GET | `/api/uploads/:id/image.svg|png` · `/api/uploads/:id/export?format=csv|json` | Imagen y exportación |
 | GET | `/api/status` | Estado de las bases de datos |
 
 ## Estructura

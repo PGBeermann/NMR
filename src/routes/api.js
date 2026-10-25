@@ -4,9 +4,12 @@ import * as pubchem from '../services/pubchem.js';
 import * as opsin from '../services/opsin.js';
 import * as nmrshiftdb from '../services/nmrshiftdb.js';
 import { analyze, publicSpectrum, savedAnalysis } from '../services/analysis.js';
-import { normalizeFormula } from '../services/molecule.js';
+import { elementCounts, normalizeFormula, unsaturation } from '../services/molecule.js';
 import { SOLVENTS } from '../services/chemistry.js';
-import { renderSpectrum } from '../services/render.js';
+import { renderSpectrum, renderUpload } from '../services/render.js';
+import { analyzePeaks, detectNucleus, interpret, literature, parsePeakCsv } from '../services/peaklist.js';
+import { findCandidates } from '../services/candidates.js';
+import { carbonFrequency } from '../services/spectrum.js';
 import { svgToPng } from '../services/plot.js';
 import { toCsv, toJcamp, toJcampPeaks, toXyCsv } from '../services/exporters.js';
 
@@ -122,6 +125,110 @@ api.get(
     res.json({ query: q, source, items });
   }),
 );
+
+// Modo 4: espectro experimental en CSV → análisis + estructuras candidatas con % de concordancia
+api.post(
+  '/spectrum/analyze',
+  wrap(async (req, res) => {
+    const b = req.body || {};
+    const peaks = parsePeakCsv(b.csv);
+    if (peaks.length > 20000) throw Object.assign(new Error('La tabla tiene demasiados picos (máx. 20 000).'), { status: 400 });
+    const nucleus = b.nucleus === '1H' || b.nucleus === '13C' ? b.nucleus : detectNucleus(peaks);
+    const frequencyFromFile = peaks.frequency || null;
+    const userFreq = Number(b.frequency) || 400;
+    const frequency = nucleus === '1H' ? frequencyFromFile || userFreq : frequencyFromFile || carbonFrequency(userFreq);
+    const solvent = SOLVENTS[b.solvent] ? b.solvent : 'CDCl3';
+    const formula = b.formula && String(b.formula).trim() ? normalizeFormula(b.formula) : null;
+    const totalH = formula ? elementCounts(formula).H || 0 : null;
+    const analysis = analyzePeaks(peaks, {
+      nucleus,
+      frequency,
+      solvent,
+      excludeSolvent: Boolean(b.excludeSolvent),
+      totalH,
+      integrals: Array.isArray(b.integrals) ? b.integrals : null,
+      gapHz: Number(b.gapHz) || 15,
+    });
+    analysis.literature = literature(analysis, solvent);
+    analysis.interpretation = interpret(analysis);
+    analysis.frequencySource = frequencyFromFile ? 'calculada de la columna Hz del archivo' : 'indicada por el usuario';
+    if (formula) analysis.unsaturation = unsaturation(formula);
+    const cands = await findCandidates(analysis, { formula, rangeOnly: Boolean(b.rangeOnly) });
+    const record = {
+      name: String(b.name || '').slice(0, 200) || null,
+      nucleus,
+      frequency,
+      solvent,
+      formula,
+      raw: String(b.csv).slice(0, 2_000_000),
+      peaks: peaks.map((p) => ({ ppm: p.ppm, intensity: p.intensity })),
+      analysis,
+      candidates: cands,
+    };
+    let id = Number(b.uploadId) || null;
+    if (id && store.getUpload(id)) store.updateUpload(id, record);
+    else id = store.saveUpload(record);
+    store.logSearch('espectro', record.name || `${nucleus} ${peaks.length} picos`, cands.candidates.length);
+    const saved = store.getUpload(id);
+    res.json({ ...saved, raw: undefined, image: `/api/uploads/${id}/image.svg` });
+  }),
+);
+
+api.get('/uploads', (req, res) => res.json({ items: store.listUploads() }));
+
+api.get('/uploads/:id', (req, res) => {
+  const u = store.getUpload(Number(req.params.id));
+  if (!u) return res.status(404).json({ error: 'No encontrado' });
+  res.json({ ...u, image: `/api/uploads/${u.id}/image.svg` });
+});
+
+api.delete('/uploads/:id', (req, res) => res.json({ deleted: store.deleteUpload(Number(req.params.id)) }));
+
+api.get('/uploads/:id/image.:ext', (req, res) => {
+  const u = store.getUpload(Number(req.params.id));
+  if (!u) return res.status(404).json({ error: 'No encontrado' });
+  const svg = renderUpload(u, {
+    from: num(req.query.from),
+    to: num(req.query.to),
+    width: Math.min(3000, num(req.query.width) || 1100),
+    height: Math.min(2000, num(req.query.height) || 500),
+  });
+  const base = `${safeName(u.name || 'espectro')}_${u.nucleus}`;
+  if (req.params.ext === 'png') {
+    res.type('png');
+    if (req.query.download) res.attachment(`${base}.png`);
+    return res.send(svgToPng(svg));
+  }
+  res.type('image/svg+xml');
+  if (req.query.download) res.attachment(`${base}.svg`);
+  res.send(svg);
+});
+
+api.get('/uploads/:id/export', (req, res) => {
+  const u = store.getUpload(Number(req.params.id));
+  if (!u) return res.status(404).json({ error: 'No encontrado' });
+  const base = `${safeName(u.name || 'espectro')}_${u.nucleus}`;
+  if (req.query.format === 'csv') {
+    const rows = [
+      ['# Espectro', u.name || ''],
+      ['# Nucleo', u.nucleus],
+      ['# Frecuencia (MHz)', u.frequency],
+      ['# Disolvente', u.solvent],
+      ['# Formula', u.formula || ''],
+      [],
+      ['MULTIPLETES'],
+      ['delta_ppm', 'desde', 'hasta', 'multiplicidad', 'J_Hz', 'nH', 'fraccion_integral', 'n_lineas', 'region'],
+      ...(u.analysis?.signals || []).map((s) => [s.delta, s.from ?? '', s.to ?? '', s.multiplicity ?? '', (s.J || []).join(' / '), s.nH ?? '', s.fraction ?? '', s.nLines ?? '', s.region]),
+      [],
+      ['CANDIDATOS'],
+      ['concordancia_%', 'nombre', 'formula', 'SMILES', 'fuente', 'desplazamientos_%', 'cobertura_%', 'integracion_%'],
+      ...(u.candidates?.candidates || []).map((c) => [c.score, c.name || '', c.formula || '', c.smiles, c.source, c.shift, c.coverage, c.integration ?? '']),
+    ];
+    const csv = rows.map((r) => r.map((v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v)).join(',')).join('\n');
+    return res.attachment(`${base}_analisis.csv`).type('text/csv').send('﻿' + csv + '\n');
+  }
+  res.attachment(`${base}_analisis.json`).json(u);
+});
 
 // Espectros guardados
 api.get('/compounds', (req, res) => {
