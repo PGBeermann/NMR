@@ -10,6 +10,7 @@ import { OCL, moleculeSvg, parseMolecule } from './molecule.js';
 import { runPrediction } from './analysis.js';
 import { parseMultiplicity } from './chemistry.js';
 import { getCachedPrediction, setCachedPrediction } from '../db.js';
+import { hoseReady, predictLocal } from './hose.js';
 
 const r = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
 const TOL = { '1H': 0.12, '13C': 2.5 };
@@ -51,9 +52,18 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
   const f = c.map((x) => x.n / sumN);
   const sim = (d) => Math.exp(-((d / tol) ** 2));
 
-  // Asignación uno a uno (voraz, por cercanía): cada señal experimental a una señal distinta del candidato
+  // Asignación uno a uno (voraz): cada señal experimental a una señal distinta del candidato.
+  // El coste combina la diferencia de desplazamiento con el desacuerdo de multiplicidad e integración,
+  // para no intercambiar señales cercanas (p. ej. H orto/para de un anillo).
   const pairs = [];
-  for (let i = 0; i < exp.length; i++) for (let j = 0; j < c.length; j++) pairs.push([i, j, Math.abs(exp[i].delta - c[j].delta)]);
+  for (let i = 0; i < exp.length; i++) {
+    for (let j = 0; j < c.length; j++) {
+      let cost = Math.abs(exp[i].delta - c[j].delta) / tol;
+      if (exp[i].nb !== null && exp[i].nb !== undefined && c[j].nb !== null && c[j].nb !== undefined) cost += 0.6 * Math.min(2, Math.abs(exp[i].nb - c[j].nb));
+      if (nucleus === '1H') cost += 2 * Math.abs(exp[i].w - f[j]);
+      pairs.push([i, j, cost]);
+    }
+  }
   pairs.sort((a, b) => a[2] - b[2]);
   const ei = new Array(exp.length).fill(-1);
   const cj = new Array(c.length).fill(-1);
@@ -181,8 +191,9 @@ async function attachNames(items) {
   if (!keys.length) return;
   try {
     const props = await pubchem.propertiesByInchikeys(keys);
+    // Para un mismo InChIKey PubChem puede devolver varios registros: el de menor CID es el compuesto principal
     const byKey = new Map();
-    for (const p of props) if (!byKey.has(p.inchikey)) byKey.set(p.inchikey, p);
+    for (const p of [...props].sort((a, b) => a.cid - b.cid)) if (!byKey.has(p.inchikey)) byKey.set(p.inchikey, p);
     for (const i of items) {
       const p = byKey.get(i.inchikey);
       if (p) Object.assign(i, { name: i.name || p.title, iupac: i.iupac || p.iupac, cid: i.cid || p.cid });
@@ -206,7 +217,7 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-export async function findCandidates(analysis, { formula = null, rangeOnly = false, maxResults = 15, maxPredict = 12 } = {}) {
+export async function findCandidates(analysis, { formula = null, rangeOnly = false, maxResults = 15, maxPredict = 6, maxPubchem = 150 } = {}) {
   const nucleus = analysis.nucleus;
   const exp = expSignals(analysis);
   // Sólo cuando el usuario fijó los nH de cada multiplete se compara el nº total de H
@@ -279,29 +290,49 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
   }
   results.push(...firstPass.sort((a, b) => b.score - a.score).slice(0, maxResults * 2));
 
-  // 2) Predicción para compuestos de PubChem con la fórmula indicada
+  // 2) Compuestos de PubChem con la fórmula indicada:
+  //    predictor local (HOSE/NMRShiftDB2) para todos los isómeros y NMRium para refinar los mejores
   let predicted = 0;
   if (formula) {
     try {
-      const cids = await pubchem.cidsByFormula(formula, 60);
+      const cids = await pubchem.cidsByFormula(formula, maxPubchem);
       // Se excluyen sales/mezclas (".") e isótopos marcados
       const props = (await pubchem.properties(cids)).filter(
-        (p) => p.formula === formula && p.smiles && !p.smiles.includes('.') && !/\[2H\]|\[13C\]|\[H\+\]/.test(p.smiles),
+        (p) => p.formula === formula && p.smiles && !p.smiles.includes('.') && !/\[\d+[A-Z]|\[H\+\]/.test(p.smiles),
       );
-      const todo = props.slice(0, maxPredict);
+      const local = hoseReady();
+      if (!local) warnings.push('El predictor local se está construyendo (unos minutos tras el primer arranque); por ahora sólo se usa el servicio NMRium, que limita el nº de consultas.');
+      const scored = [];
+      if (local) {
+        for (const p of props) {
+          let sig;
+          try {
+            sig = predictLocal(parseMolecule({ smiles: p.smiles }), nucleus);
+          } catch {
+            continue;
+          }
+          if (!sig?.length) continue;
+          const s = score(sig, p.formula, p.smiles);
+          if (s.base) scored.push({ ...refine(s), p, signals: sig, method: 'local' });
+        }
+        scored.sort((a, b) => b.score - a.score);
+      }
+      // NMRium: predicción completa (con J) para los mejores candidatos, si el servicio responde
+      const remoteTodo = local ? scored.slice(0, 3).map((x) => x.p) : props.slice(0, maxPredict);
       let limited = false;
-      const preds = await mapLimit(todo, 1, async (p) => {
+      const remote = [];
+      for (const p of remoteTodo) {
         const mol = parseMolecule({ smiles: p.smiles });
         const key = `v2:${mol.getIDCode()}`;
         let cached = getCachedPrediction(key);
         if (!cached) {
-          if (limited) return null;
+          if (limited) continue;
           let pr;
           try {
-            pr = await runPrediction(mol, { retries: 1 });
+            pr = await runPrediction(mol, { retries: 0 });
           } catch (e) {
             if (/Too Many Requests|429/i.test(e.message)) limited = true;
-            throw e;
+            continue;
           }
           // nb: nº de H vecinos con J ≥ 3 Hz (los acoplamientos menores no se resuelven en la práctica)
           const nbOf = (s) =>
@@ -317,14 +348,13 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
           nb: nucleus === '1H' ? (s.nb ?? neighborsFromMultiplicity(s.m)) : null,
         }));
         const s = score(signals, p.formula, p.smiles);
-        if (!s.base) return null;
-        return { ...refine(s), p, signals };
-      });
-      for (const x of preds.filter(Boolean)) {
-        predicted++;
-        results.push({
+        if (s.base) remote.push({ ...refine(s), p, signals, method: 'nmrium' });
+      }
+      predicted = scored.length + remote.length;
+      for (const x of [...scored.slice(0, maxResults * 2), ...remote]) {
+        const item = {
           ...x,
-          source: 'Predicción (compuesto de PubChem)',
+          source: x.method === 'local' ? 'Predicción local (entornos HOSE de NMRShiftDB2)' : 'Predicción NMRium (con constantes J)',
           kind: 'predicho',
           smiles: x.p.smiles,
           inchikey: x.p.inchikey,
@@ -333,15 +363,18 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
           iupac: x.p.iupac,
           cid: x.p.cid,
           candidateSignals: x.signals.map((s) => ({ delta: r(s.delta, 2), n: s.n })),
-        });
-        delete results[results.length - 1].p;
-        delete results[results.length - 1].signals;
+        };
+        delete item.p;
+        delete item.signals;
+        delete item.method;
+        results.push(item);
       }
-      if (limited) {
+      if (limited && !local) {
         warnings.push(
-          `El servicio de predicción limitó la frecuencia de consultas: se evaluaron ${predicted} de ${todo.length} candidatos de PubChem. Repita la búsqueda en 1–2 minutos (las predicciones ya hechas quedan guardadas).`,
+          `El servicio de predicción NMRium limitó la frecuencia de consultas: se evaluaron ${remote.length} candidatos. Repita la búsqueda en 1–2 minutos (las predicciones ya hechas quedan guardadas).`,
         );
       }
+      if (props.length >= maxPubchem) warnings.push(`Se evaluaron los primeros ${maxPubchem} isómeros de PubChem con esta fórmula.`);
     } catch (e) {
       warnings.push(`PubChem/predicción: ${e.message}`);
     }

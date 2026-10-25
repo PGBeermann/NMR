@@ -24,6 +24,7 @@ app.listen(config.port, () => {
   console.log(`Analizador RMN escuchando en http://localhost:${config.port}  (datos: ${config.dataDir})`);
   if (nmrshiftdb.isReady()) {
     console.log(`NMRShiftDB2 lista: ${nmrshiftdb.status.records} compuestos`);
+    nmrshiftdb.ensureHose();
   } else if (config.nmrshiftdbAuto) {
     console.log('NMRShiftDB2 no encontrada: se descargará e indexará en segundo plano.');
     nmrshiftdb.startIndexing();

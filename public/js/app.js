@@ -86,12 +86,13 @@ async function refreshStatus() {
           ? `NMRShiftDB2: descargando ${(p.bytes / 1e6).toFixed(0)}${p.total ? ` / ${(p.total / 1e6).toFixed(0)}` : ''} MB`
           : `NMRShiftDB2: indexando ${p.records?.toLocaleString('es') || ''}`;
     }
-    $('#status').textContent = `${txt} · ${s.store.compounds} compuestos guardados`;
+    const pred = n.predictor === 'listo' ? '' : n.predictor === 'construyendo' ? ' · predictor local: construyendo…' : '';
+    $('#status').textContent = `${txt}${pred} · ${s.store.compounds} compuestos guardados`;
     const sel = $('#solvent');
     if (!sel.options.length) {
       for (const [k, v] of Object.entries(s.solvents)) sel.add(new Option(v.name, k, k === 'CDCl3', k === 'CDCl3'));
     }
-    if (n.state === 'construyendo') setTimeout(refreshStatus, 5000);
+    if (n.state === 'construyendo' || n.predictor === 'construyendo') setTimeout(refreshStatus, 5000);
   } catch {
     $('#status').textContent = 'Servidor no disponible';
   }

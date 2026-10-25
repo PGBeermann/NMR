@@ -17,7 +17,7 @@ Aplicación web en **Node.js** para el análisis de espectros de **RMN-¹H** y *
 4. **Espectro experimental (CSV) → estructura**: se carga o pega una tabla de picos (`ppm` e intensidad; opcional una columna `Hz`, con la que se calcula la frecuencia del equipo). El programa:
    - agrupa las líneas en multipletes, calcula su centro, la multiplicidad (fusionando la estructura fina < 2.5 Hz), las constantes **J** y la integración relativa (con la fórmula reparte el nº total de H; el usuario puede corregir los nH y recalcular);
    - marca las señales del disolvente y propone **fragmentos estructurales** (benceno monosustituido, sustituyente donador/aceptor, OCH₃, acetilo, etilo, isopropilo, OH/NH…);
-   - busca **estructuras candidatas** en los ~17 600 espectros de ¹H (o ~58 000 de ¹³C) de NMRShiftDB2 y, si se indica la fórmula, predice los espectros de los compuestos de PubChem con esa fórmula;
+   - busca **estructuras candidatas** en los ~17 600 espectros de ¹H (o ~58 000 de ¹³C) de NMRShiftDB2 y, si se indica la fórmula, predice los espectros de todos los isómeros de PubChem con esa fórmula (hasta 150) con un **predictor local** (códigos de entorno tipo HOSE construidos a partir de NMRShiftDB2, `data/hose.db`, ~2 min la primera vez) y refina los 3 mejores con el servicio NMRium (que limita el nº de consultas);
    - ordena los candidatos por **% de concordancia** = desplazamientos (±0.12 ppm) + cobertura de las señales del candidato + integración + nº de señales + **multiplicidad esperada por la regla n+1** (calculada desde la estructura), con reconocimiento de OH/NH intercambiables.
    Ejemplo incluido: `public/examples/fenol-cdcl3-400MHz.tsv`.
 

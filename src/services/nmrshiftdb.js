@@ -8,7 +8,23 @@ import { config } from '../config.js';
 const dbFile = path.join(config.dataDir, 'nmrshiftdb.db');
 let db = null;
 
-export const status = { state: 'no disponible', detail: null, records: 0, builtAt: null, progress: null };
+export const status = { state: 'no disponible', detail: null, records: 0, builtAt: null, progress: null, predictor: 'no disponible' };
+
+// Tabla de entornos (HOSE) para el predictor local; se construye una vez tras el índice
+export function ensureHose() {
+  if (fs.existsSync(path.join(config.dataDir, 'hose.db'))) {
+    status.predictor = 'listo';
+    return;
+  }
+  if (status.predictor === 'construyendo' || !fs.existsSync(dbFile)) return;
+  status.predictor = 'construyendo';
+  const worker = new Worker(new URL('./hose-worker.js', import.meta.url), { workerData: { dataDir: config.dataDir } });
+  worker.on('message', (m) => {
+    if (m.type === 'done') status.predictor = 'listo';
+    if (m.type === 'error') status.predictor = `error: ${m.message}`;
+  });
+  worker.on('error', (e) => (status.predictor = `error: ${e.message}`));
+}
 
 function open() {
   if (db) return db;
@@ -41,6 +57,7 @@ export function startIndexing({ force = false } = {}) {
       db = null;
       open();
       status.detail = `Índice construido: ${m.records} compuestos`;
+      ensureHose();
     }
     if (m.type === 'error') {
       status.state = 'error';
