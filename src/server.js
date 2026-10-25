@@ -10,7 +10,15 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.use('/api', api);
-app.use(express.static(path.join(config.root, 'public'), { maxAge: '1h' }));
+// HTML, JS y CSS se revalidan siempre (ETag) para que cada actualización llegue de inmediato
+app.use(
+  express.static(path.join(config.root, 'public'), {
+    maxAge: '1h',
+    setHeaders: (res, file) => {
+      if (/\.(html|js|css)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
+    },
+  }),
+);
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 // eslint-disable-next-line no-unused-vars
