@@ -305,8 +305,12 @@ export function interpret(analysis) {
   for (const s of S) {
     const n = nh(s);
     if (s.multiplicity === 's' && Math.abs(n - 3) < 0.6 && near(s, 3.55, 4.05)) add('Metoxilo (–OCH₃)', `singlete de 3H en δ ${s.delta.toFixed(2)} (éster metílico ~3.7; anisol ~3.8)`);
-    if (s.multiplicity === 's' && Math.abs(n - 3) < 0.6 && near(s, 1.95, 2.25)) add('Acetilo (CH₃–C=O)', `singlete de 3H en δ ${s.delta.toFixed(2)}`);
-    if (s.multiplicity === 's' && Math.abs(n - 3) < 0.6 && near(s, 2.25, 2.6)) add('CH₃ sobre anillo aromático o metilcetona', `singlete de 3H en δ ${s.delta.toFixed(2)}`);
+    if (s.multiplicity === 's' && Math.abs(n - 3) < 0.6 && near(s, 1.95, 2.6)) {
+      // Ar–CH₃ (2.2–2.5) y acetilo (2.0–2.2) se solapan: se decide por la presencia de H aromáticos
+      if (arH && s.delta >= 2.15) add('Metilo sobre anillo aromático (Ar–CH₃)', `singlete de 3H en δ ${s.delta.toFixed(2)} y presencia de H aromáticos (un acetilo daría ~2.0–2.2 ppm)`);
+      else if (s.delta < 2.2) add('Acetilo (CH₃–C=O)', `singlete de 3H en δ ${s.delta.toFixed(2)}`);
+      else add('Metilcetona (CH₃–C=O) o CH₃ alílico', `singlete de 3H en δ ${s.delta.toFixed(2)}`);
+    }
     if (s.multiplicity === 's' && Math.abs(n - 9) < 1 && near(s, 0.8, 1.6)) add('terc-Butilo (–C(CH₃)₃)', `singlete de 9H en δ ${s.delta.toFixed(2)}`);
     if (near(s, 9.3, 10.6) && n <= 1.5) add('Aldehído (–CHO)', `señal de 1H en δ ${s.delta.toFixed(2)}`);
     if (s.delta >= 10.5 && n <= 1.5) add('Ácido carboxílico (–COOH) o fenol con puente de H', `señal de 1H en δ ${s.delta.toFixed(2)}`);

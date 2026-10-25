@@ -50,4 +50,16 @@ assert.ok(shifted.sdOk && shifted.errorSd < 0.02, `DE ${shifted.errorSd}`);
 const scattered = concordance(exp, [{ delta: 7.44, n: 2, nb: 2 }, { delta: 6.73, n: 1, nb: 2 }, { delta: 7.04, n: 2, nb: 1 }, { delta: 5.15, n: 1, nb: 0 }], '1H');
 assert.ok(!scattered.sdOk && scattered.errorSd > 0.1, `DE ${scattered.errorSd}`);
 
+// o-Cresol a 90 MHz: los 4 H aromáticos forman un solo multiplete; las señales del candidato
+// se agrupan y la forma del multiplete favorece al isómero orto frente al para
+const pc = parsePeakCsv(fs.readFileSync(new URL('./fixtures/o-cresol-90MHz.tsv', import.meta.url), 'utf8'));
+assert.equal(pc.frequency, 90);
+const ac = analyzePeaks(pc, { nucleus: '1H', frequency: 90, totalH: 8 });
+assert.equal(ac.signals.length, 3);
+const expC = ac.signals.map((s) => ({ delta: s.delta, w: s.fraction, mult: s.multiplicity, nb: neighborsFromMultiplicity(s.multiplicity), from: s.from, to: s.to, lines: s.lines, freq: 90 }));
+const ortho = concordance(expC, [{ delta: 2.2, n: 3, nb: 0 }, { delta: 7.12, n: 1, nb: 1 }, { delta: 7.08, n: 1, nb: 2 }, { delta: 6.86, n: 1, nb: 2 }, { delta: 6.77, n: 1, nb: 1 }], '1H');
+const para = concordance(expC, [{ delta: 2.27, n: 3, nb: 0 }, { delta: 7.03, n: 2, nb: 1 }, { delta: 6.74, n: 2, nb: 1 }], '1H');
+assert.ok(ortho.sdOk, `DE orto ${ortho.errorSd}`);
+assert.ok(ortho.score > para.score, `orto ${ortho.score} vs para ${para.score}`);
+
 console.log('Todas las pruebas pasaron ✔');
