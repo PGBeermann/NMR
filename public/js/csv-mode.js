@@ -19,6 +19,12 @@ $('#btnCsvExample').addEventListener('click', async () => {
 
 $('#btnCsv').addEventListener('click', () => analyzeCsv());
 
+// Al elegir ¹³C se propone una tolerancia acorde (2 ppm)
+$('#csvNucleus').addEventListener('change', (e) => {
+  if (e.target.value === '13C' && Number($('#csvTolerance').value) < 0.5) $('#csvTolerance').value = 2;
+  if (e.target.value === '1H' && Number($('#csvTolerance').value) > 0.5) $('#csvTolerance').value = 0.08;
+});
+
 async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
   const csv = currentUpload && uploadId ? currentUpload.csv : $('#csvText').value;
   if (!csv.trim()) return showError('Cargue un archivo o pegue la tabla de picos.');
@@ -34,6 +40,8 @@ async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
         formula: $('#csvFormula').value.trim(),
         excludeSolvent: $('#csvExcludeSolvent').checked,
         rangeOnly: $('#csvRangeOnly').checked,
+        tolerance: Number($('#csvTolerance').value) || null,
+        minScore: $('#csvMinScore').value === '' ? null : Number($('#csvMinScore').value),
         integrals,
         uploadId,
         ...options(),
@@ -76,7 +84,8 @@ function candidateCard(x, k, isH) {
   const rows = x.matches
     .map((m) => {
       const cand = m.candidate === null ? '—' : `${fmt(m.candidate, 2)}${m.n ? ` <span class="muted">(${m.n}${isH ? 'H' : 'C'})</span>` : ''}`;
-      const diff = m.diff === null ? `<span class="muted">${esc(m.note || '')}</span>` : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 2)}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
+      const mark = m.diff === null ? '' : m.within ? ' <span class="badge ok">✓</span>' : ' <span class="badge exp">fuera</span>';
+      const diff = m.diff === null ? `<span class="muted">${esc(m.note || '')}</span>` : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 3)}${mark}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
       return `<tr><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
     })
     .join('');
@@ -94,7 +103,7 @@ function candidateCard(x, k, isH) {
       x.exchangeable ? ' · incluye OH/NH intercambiable' : ''
     }</div>
     <details><summary>Señales comparadas</summary>
-      <table><thead><tr><th>δ exp.</th><th>δ candidato</th><th>Δ (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>δ exp.</th><th>δ candidato</th><th>Δδ (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
       ${x.unexplained?.length ? `<p class="muted" style="font-size:.8rem">Señales del candidato sin correspondencia: ${x.unexplained.join(', ')} ppm</p>` : ''}
     </details>
     <div class="btns" style="margin-top:auto">
@@ -145,12 +154,21 @@ function renderUploadResult(u) {
     </div>
   </section>`);
 
-  parts.push(`<h2 class="section-title">Estructuras candidatas (${c.candidates.length})</h2>
+  const minScore = c.params?.minScore ?? 90;
+  const tolTxt = c.params?.tolerance ?? (isH ? 0.08 : 2);
+  parts.push(`<h2 class="section-title">Estructuras candidatas con concordancia ≥ ${minScore} % (${c.candidates.length})</h2>
     <p class="muted" style="font-size:.85rem">${esc(c.method || '')} Se compararon ${c.searched?.nmrshiftdb ?? 0} compuestos de NMRShiftDB2${
       c.searched?.predicted ? ` y ${c.searched.predicted} espectros predichos de compuestos de PubChem` : ''
     }. ${u.formula ? '' : '<b>Sin fórmula molecular la búsqueda es muy amplia: indíquela para afinar los resultados.</b>'}</p>`);
   for (const w of c.warnings || []) parts.push(`<div class="warn">${esc(w)}</div>`);
-  if (!c.candidates.length) parts.push('<p class="muted">No se encontraron estructuras compatibles.</p>');
+  if (!c.candidates.length) {
+    const b = c.bestBelow;
+    parts.push(
+      `<div class="warn">Ninguna estructura alcanza el ${minScore} % de concordancia con |Δδ| ≤ ${tolTxt} ppm.${
+        b ? ` La mejor encontrada fue <b>${esc(b.name || b.smiles)}</b> con ${fmt(b.score, 1)} %.` : ''
+      } Puede indicar la fórmula molecular, corregir los nH, ampliar la tolerancia o bajar la concordancia mínima.</div>`,
+    );
+  }
   parts.push(`<div class="cands">${c.candidates.map((x, k) => candidateCard(x, k, isH)).join('')}</div>`);
   $('#results').innerHTML = parts.join('\n');
 

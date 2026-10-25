@@ -8,7 +8,7 @@ import { elementCounts, normalizeFormula, unsaturation } from '../services/molec
 import { SOLVENTS } from '../services/chemistry.js';
 import { renderSpectrum, renderUpload } from '../services/render.js';
 import { analyzePeaks, detectNucleus, interpret, literature, parsePeakCsv } from '../services/peaklist.js';
-import { findCandidates } from '../services/candidates.js';
+import { MIN_SCORE, TOL, findCandidates } from '../services/candidates.js';
 import { carbonFrequency } from '../services/spectrum.js';
 import { svgToPng } from '../services/plot.js';
 import { toCsv, toJcamp, toJcampPeaks, toXyCsv } from '../services/exporters.js';
@@ -153,7 +153,11 @@ api.post(
     analysis.interpretation = interpret(analysis);
     analysis.frequencySource = frequencyFromFile ? 'calculada de la columna Hz del archivo' : 'indicada por el usuario';
     if (formula) analysis.unsaturation = unsaturation(formula);
-    const cands = await findCandidates(analysis, { formula, rangeOnly: Boolean(b.rangeOnly) });
+    // Tolerancia |Δδ| (ppm) y concordancia mínima (%) para mostrar candidatos
+    const tolMax = nucleus === '1H' ? 1 : 20;
+    const tolerance = Number(b.tolerance) > 0 ? Math.min(tolMax, Number(b.tolerance)) : TOL[nucleus];
+    const minScore = Number.isFinite(Number(b.minScore)) && b.minScore !== '' && b.minScore !== null ? Math.max(0, Math.min(100, Number(b.minScore))) : MIN_SCORE;
+    const cands = await findCandidates(analysis, { formula, rangeOnly: Boolean(b.rangeOnly), tolerance, minScore });
     const record = {
       name: String(b.name || '').slice(0, 200) || null,
       nucleus,

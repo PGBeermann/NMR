@@ -43,5 +43,9 @@ const exp = an.signals.map((s) => ({ delta: s.delta, w: s.fraction, nb: neighbor
 const good = concordance(exp, [{ delta: 7.24, n: 2, nb: 2 }, { delta: 6.93, n: 1, nb: 2 }, { delta: 6.84, n: 2, nb: 1 }, { delta: 5.3, n: 1, nb: 0 }], '1H');
 const bad = concordance(exp, [{ delta: 3.7, n: 3, nb: 0 }, { delta: 1.2, n: 3, nb: 2 }], '1H');
 assert.ok(good.score > 90 && bad.score < 30, `concordancia ${good.score} / ${bad.score}`);
+// Ventana estricta de 0.08 ppm: un desplazamiento a 0.09 ppm ya no coincide
+const off = concordance(exp, [{ delta: 7.33, n: 2, nb: 2 }, { delta: 6.93, n: 1, nb: 2 }, { delta: 6.84, n: 2, nb: 1 }, { delta: 5.35, n: 1, nb: 0 }], '1H');
+assert.equal(off.matched, 3);
+assert.ok(off.score < good.score);
 
 console.log('Todas las pruebas pasaron ✔');
