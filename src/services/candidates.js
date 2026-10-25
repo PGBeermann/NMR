@@ -292,7 +292,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
       let limited = false;
       const preds = await mapLimit(todo, 1, async (p) => {
         const mol = parseMolecule({ smiles: p.smiles });
-        const key = mol.getIDCode();
+        const key = `v2:${mol.getIDCode()}`;
         let cached = getCachedPrediction(key);
         if (!cached) {
           if (limited) return null;
@@ -303,14 +303,18 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
             if (/Too Many Requests|429/i.test(e.message)) limited = true;
             throw e;
           }
-          const simp = (sp) => (sp ? sp.joinedSignals.map((s) => ({ delta: s.delta, n: s.nbAtoms, m: s.multiplicity || null })) : []);
+          // nb: nº de H vecinos con J ≥ 3 Hz (los acoplamientos menores no se resuelven en la práctica)
+          const nbOf = (s) =>
+            (s.js || []).filter((jj) => jj.coupling >= 3).reduce((a, jj) => a + (neighborsFromMultiplicity(jj.multiplicity) ?? 1), 0);
+          const simp = (sp) =>
+            sp ? sp.joinedSignals.map((s) => ({ delta: s.delta, n: s.nbAtoms, m: s.multiplicity || null, nb: nbOf(s) })) : [];
           cached = { proton: simp(pr.spectra.proton), carbon: simp(pr.spectra.carbon) };
           setCachedPrediction(key, cached.proton, cached.carbon);
         }
         const signals = (nucleus === '1H' ? cached.proton : cached.carbon).map((s) => ({
           delta: s.delta,
           n: s.n,
-          nb: nucleus === '1H' ? neighborsFromMultiplicity(s.m) : null,
+          nb: nucleus === '1H' ? (s.nb ?? neighborsFromMultiplicity(s.m)) : null,
         }));
         const s = score(signals, p.formula, p.smiles);
         if (!s.base) return null;
