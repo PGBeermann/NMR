@@ -1,4 +1,6 @@
 // Dibuja espectros de RMN como imagen SVG (y PNG mediante resvg).
+import fs from 'node:fs';
+import path from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 
 const esc = (s) =>
@@ -192,11 +194,37 @@ export function spectrumSvg(o) {
   return parts.join('\n');
 }
 
+// Archivos de fuentes conocidos (en Docker: paquete fonts-dejavu-core).
+// Se pasan explícitamente porque resvg no siempre detecta las fuentes del sistema.
+let fontFiles = null;
+function findFonts() {
+  if (fontFiles) return fontFiles;
+  fontFiles = [];
+  const dirs = ['/usr/share/fonts', '/usr/local/share/fonts', 'C:/Windows/Fonts'];
+  const walk = (dir, depth = 0) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory() && depth < 4) walk(p, depth + 1);
+      else if (/^(DejaVuSans(-Bold)?|arial|arialbd)\.ttf$/i.test(e.name)) fontFiles.push(p);
+    }
+  };
+  for (const d of dirs) walk(d);
+  return fontFiles;
+}
+
 export function svgToPng(svg, width = 2200) {
+  const files = findFonts();
+  const family = files.some((f) => /DejaVu/i.test(f)) ? 'DejaVu Sans' : 'Arial';
   const r = new Resvg(svg, {
     fitTo: { mode: 'width', value: width },
     background: 'white',
-    font: { loadSystemFonts: true, defaultFontFamily: 'DejaVu Sans' },
+    font: { fontFiles: files, loadSystemFonts: files.length === 0, defaultFontFamily: family, sansSerifFamily: family },
   });
   return r.render().asPng();
 }
