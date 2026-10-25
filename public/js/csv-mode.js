@@ -30,6 +30,7 @@ async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
   if (!csv.trim()) return showError('Cargue un archivo o pegue la tabla de picos.');
   showLoading('Analizando el espectro y buscando estructuras compatibles (si indicó la fórmula puede tardar hasta un minuto)…');
   $('#results').innerHTML = '';
+  $('#uploadView').innerHTML = '';
   try {
     const r = await api('/api/spectrum/analyze', {
       method: 'POST',
@@ -51,7 +52,7 @@ async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
     currentUpload = { id: r.id, csv };
     renderUploadResult(r);
     refreshStatus();
-    $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('#uploadView').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     showError(e.message);
   }
@@ -123,7 +124,8 @@ function renderUploadResult(u) {
     : '<th>δ (ppm)</th><th>Intensidad</th><th>Región</th>';
   const parts = [];
   parts.push(`<section class="panel spectrum experimental">
-    <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (CSV)</span></h3>
+    <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (CSV)</span>
+      <button class="small" id="btnCloseUpload" style="margin-left:auto" title="Quitar este espectro de la pantalla (sigue guardado)">Cerrar espectro ✕</button></h3>
     <div class="meta">${u.frequency} MHz (${esc(a.frequencySource || '')}) · ${esc(u.solvent)} · ${u.peaks.length} picos${
       u.formula ? ` · ${esc(u.formula)} (IDH ${a.unsaturation})` : ''
     }</div>
@@ -170,7 +172,8 @@ function renderUploadResult(u) {
     );
   }
   parts.push(`<div class="cands">${c.candidates.map((x, k) => candidateCard(x, k, isH)).join('')}</div>`);
-  $('#results').innerHTML = parts.join('\n');
+  parts.push('<div id="candAnalysis"></div>');
+  $('#uploadView').innerHTML = parts.join('\n');
 
   // Zoom
   const img = $(`#img-u${u.id}`);
@@ -201,10 +204,33 @@ function renderUploadResult(u) {
     if (ints.some((v) => !(v > 0))) return showError('Todos los nH deben ser mayores que cero.');
     analyzeCsv({ integrals: ints, uploadId: u.id });
   });
+  $('#btnCloseUpload').addEventListener('click', () => {
+    $('#uploadView').innerHTML = '';
+    currentUpload = null;
+  });
+  // Al elegir un candidato, su análisis completo aparece debajo: el espectro experimental sigue arriba
   document.querySelectorAll('[data-cand]').forEach((b) =>
     b.addEventListener('click', () => {
       const x = c.candidates[Number(b.dataset.cand)];
-      runAnalysis({ smiles: x.smiles, cid: x.cid, name: x.name, mode: 'espectro', query: u.name || 'csv' });
+      document.querySelectorAll('.cand').forEach((el) => el.classList.remove('selected'));
+      b.closest('.cand').classList.add('selected');
+      const header = `<div class="panel selected-cand">
+        <div><b>Estructura candidata seleccionada:</b> ${esc(x.name || x.iupac || x.smiles)} —
+        <span style="color:${scoreColor(x.score)};font-weight:700">${fmt(x.score, 1)} % de concordancia</span>
+        con el espectro experimental «${esc(u.name || 'cargado')}» (arriba).</div>
+        <div class="btns"><button class="small" id="btnBackSpectrum">↑ Ver espectro experimental</button>
+        <button class="small" id="btnCloseCand">Cerrar análisis del candidato</button></div>
+      </div>`;
+      runAnalysis(
+        { smiles: x.smiles, cid: x.cid, name: x.name, mode: 'espectro', query: u.name || 'csv' },
+        { target: '#candAnalysis', header },
+      ).then(() => {
+        $('#btnBackSpectrum')?.addEventListener('click', () => $('#uploadView').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        $('#btnCloseCand')?.addEventListener('click', () => {
+          $('#candAnalysis').innerHTML = '';
+          document.querySelectorAll('.cand').forEach((el) => el.classList.remove('selected'));
+        });
+      });
     }),
   );
 }
@@ -233,8 +259,9 @@ async function loadUploads() {
         $('#csvText').value = u.raw || '';
         $('#csvName').value = u.name || '';
         $('#csvFormula').value = u.formula || '';
+        $('#results').innerHTML = '';
         renderUploadResult(u);
-        $('#results').scrollIntoView({ behavior: 'smooth' });
+        $('#uploadView').scrollIntoView({ behavior: 'smooth' });
       }),
     );
     $('#uploadList').querySelectorAll('[data-udel]').forEach((b) =>

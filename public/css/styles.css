@@ -133,3 +133,9 @@ label.check input { margin-top: 3px; }
 .pct { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .breakdown { font-size: .78rem; color: var(--muted); }
 input.nh { width: 64px; padding: 3px 5px; }
+
+/* Espectro cargado fijado arriba y candidato seleccionado */
+#uploadView .spectrum h3 { display: flex; }
+.cand.selected { border: 2px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.selected-cand { border-left: 4px solid var(--accent); background: var(--accent-soft); margin-top: 18px; }
+#candAnalysis:empty { display: none; }

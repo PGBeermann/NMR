@@ -122,18 +122,31 @@ $('#btnAnalyze').addEventListener('click', () => {
   runAnalysis({ smiles, molfile: smiles ? molfile : '', mode: 'estructura', query: smiles });
 });
 
-async function runAnalysis(payload) {
-  showLoading('Prediciendo espectros y buscando en las bases de datos…');
-  $('#results').innerHTML = '';
+/**
+ * Análisis completo de una estructura. Por defecto se muestra en #results; con `target`
+ * se muestra en otra zona (p. ej. debajo del espectro experimental cargado, sin borrarlo).
+ */
+async function runAnalysis(payload, { target = '#results', header = '' } = {}) {
+  const box = $(target);
+  const inline = target !== '#results';
+  if (inline) {
+    $('#error').classList.add('hidden');
+    box.innerHTML = '<div class="loading"><div class="spinner"></div><span>Prediciendo los espectros del candidato y buscando en las bases de datos…</span></div>';
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    showLoading('Prediciendo espectros y buscando en las bases de datos…');
+    box.innerHTML = '';
+  }
   try {
     const r = await api('/api/analyze', { method: 'POST', body: JSON.stringify({ ...payload, ...options() }) });
-    hideLoading();
-    renderResults(r);
+    if (!inline) hideLoading();
+    renderResults(r, target, header);
     if (payload.mode !== 'estructura') loadIntoEditor({ molfile: r.compound.molfile });
     refreshStatus();
-    $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
-    showError(e.message);
+    if (inline) box.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+    else showError(e.message);
   }
 }
 
@@ -298,7 +311,7 @@ $('#savedFilter').addEventListener('input', () => {
 });
 
 // ---------- Resultados ----------
-function renderResults(r) {
+function renderResults(r, target = '#results', header = '') {
   const c = r.compound;
   const info = c.info || {};
   const s = r.summary;
@@ -348,7 +361,7 @@ function renderResults(r) {
         .join(' · ')}</p>`,
     );
   for (const sp of others) parts.push(renderSpectrum(sp));
-  $('#results').innerHTML = parts.join('\n');
+  $(target).innerHTML = header + parts.join('\n');
   bindSpectrumControls();
 }
 
@@ -473,7 +486,7 @@ function setZoom(id, from, to) {
 }
 
 function bindSpectrumControls() {
-  document.querySelectorAll('.zoom').forEach((z) => {
+  document.querySelectorAll('.zoom[data-id]').forEach((z) => {
     const id = z.dataset.id;
     z.querySelector('.z-apply').onclick = () => {
       const a = parseFloat(z.querySelector('.z-from').value);
