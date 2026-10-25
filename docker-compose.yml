@@ -1,0 +1,16 @@
+# Alternativa para Dokploy (tipo "Compose") o para ejecutar con: docker compose up -d
+services:
+  nmr:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - DATA_DIR=/app/data
+      - NMRSHIFTDB_AUTO=1
+    volumes:
+      - nmr-data:/app/data
+    expose:
+      - "3000"
+
+volumes:
+  nmr-data:

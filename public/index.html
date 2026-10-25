@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analizador RMN ¹H / ¹³C</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 28h4l3-20 2 20 3-12 2 12 3-24 2 24 3-8 2 8h4' fill='none' stroke='%231f4e9c' stroke-width='2'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://jsme-editor.github.io/dist/jsme/jsme.nocache.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M2 28h4l3-20 2 20 3-12 2 12 3-24 2 24 3-8 2 8h4" /></svg>
+      <div>
+        <h1>Analizador RMN <span>¹H · ¹³C</span></h1>
+        <p>Predicción, simulación y búsqueda de espectros de compuestos orgánicos</p>
+      </div>
+    </div>
+    <div class="status" id="status">Comprobando bases de datos…</div>
+  </header>
+
+  <main>
+    <section class="panel options">
+      <label>Frecuencia ¹H
+        <select id="frequency">
+          <option>60</option><option>90</option><option>200</option><option>300</option>
+          <option selected>400</option><option>500</option><option>600</option><option>800</option>
+        </select> MHz
+      </label>
+      <label>Disolvente
+        <select id="solvent"></select>
+      </label>
+      <span class="hint">La frecuencia de ¹³C se calcula automáticamente (≈ ¼ de la de ¹H).</span>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="draw" role="tab">1 · Dibujar estructura</button>
+      <button class="tab" data-tab="formula" role="tab">2 · Fórmula molecular</button>
+      <button class="tab" data-tab="name" role="tab">3 · Nombre IUPAC</button>
+      <button class="tab" data-tab="saved" role="tab">Espectros guardados</button>
+    </nav>
+
+    <section class="panel tabpanel" id="tab-draw">
+      <div class="row">
+        <div class="jsme-wrap"><div id="jsme_container"><p class="muted">Cargando editor JSME…</p></div></div>
+        <div class="side">
+          <h3>Dibuje la molécula</h3>
+          <p class="muted">Use el editor JSME para dibujar la estructura y pulse <b>Analizar</b>. Se predicen los espectros de ¹H y ¹³C, se simulan las imágenes y se buscan espectros experimentales en PubChem (HMDB, SpectraBase) y NMRShiftDB2.</p>
+          <label class="block">o escriba un SMILES
+            <input id="smilesInput" placeholder="p. ej. CCOC(C)=O" spellcheck="false" />
+          </label>
+          <label class="block">Ejemplos
+            <select id="examples">
+              <option value="">— seleccione —</option>
+              <option value="CCO">Etanol</option>
+              <option value="CCOC(C)=O">Acetato de etilo</option>
+              <option value="CCC(C)=O">2-Butanona</option>
+              <option value="Cc1ccccc1">Tolueno</option>
+              <option value="CC(=O)Oc1ccccc1C(O)=O">Ácido acetilsalicílico</option>
+              <option value="CC(C)Cc1ccc(cc1)C(C)C(O)=O">Ibuprofeno</option>
+              <option value="C=CC(=O)OC">Acrilato de metilo</option>
+              <option value="O=Cc1ccc(O)c(OC)c1">Vainillina</option>
+              <option value="CC(C)=CCC/C(C)=C/C=O">Citral (geranial)</option>
+              <option value="c1ccc2ccccc2c1">Naftaleno</option>
+            </select>
+          </label>
+          <div class="btns">
+            <button class="primary" id="btnAnalyze">Analizar</button>
+            <button id="btnClear">Limpiar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel tabpanel hidden" id="tab-formula">
+      <form id="formFormula" class="searchbar">
+        <input id="formulaInput" placeholder="Fórmula molecular, p. ej. C4H8O2" spellcheck="false" required />
+        <button class="primary">Buscar compuestos</button>
+      </form>
+      <p class="muted">Busca en PubChem todos los compuestos con esa fórmula (con sus nombres) y marca los que tienen espectros asignados en NMRShiftDB2.</p>
+      <div id="formulaResults"></div>
+    </section>
+
+    <section class="panel tabpanel hidden" id="tab-name">
+      <form id="formName" class="searchbar">
+        <input id="nameInput" placeholder="Nombre IUPAC, p. ej. 2-metilpropan-1-ol / 2-methylpropan-1-ol" spellcheck="false" required />
+        <button class="primary">Buscar espectros</button>
+      </form>
+      <p class="muted">Se resuelve el nombre en PubChem (nombres IUPAC y comunes, en inglés). Si no existe, se interpreta el nombre sistemático con OPSIN.</p>
+      <div id="nameResults"></div>
+    </section>
+
+    <section class="panel tabpanel hidden" id="tab-saved">
+      <div class="searchbar">
+        <input id="savedFilter" placeholder="Filtrar por nombre, fórmula o SMILES" />
+        <button id="btnSavedRefresh">Actualizar</button>
+      </div>
+      <div id="savedList"></div>
+    </section>
+
+    <div id="loading" class="loading hidden"><div class="spinner"></div><span id="loadingText">Analizando…</span></div>
+    <div id="error" class="error hidden"></div>
+    <section id="results"></section>
+  </main>
+
+  <footer>
+    Predicción: <a href="https://www.nmrium.org" target="_blank" rel="noopener">nmr-processing (NMRium/Zakodium)</a> ·
+    Datos: <a href="https://pubchem.ncbi.nlm.nih.gov" target="_blank" rel="noopener">PubChem</a>,
+    <a href="https://nmrshiftdb.nmr.uni-koeln.de" target="_blank" rel="noopener">NMRShiftDB2</a>,
+    <a href="https://www.ebi.ac.uk/opsin/" target="_blank" rel="noopener">OPSIN</a> ·
+    Editor: <a href="https://jsme-editor.github.io" target="_blank" rel="noopener">JSME</a>
+  </footer>
+  <script src="js/app.js"></script>
+</body>
+</html>

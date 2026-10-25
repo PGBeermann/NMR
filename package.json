@@ -1,0 +1,25 @@
+{
+  "name": "nmr-analyzer",
+  "version": "1.0.0",
+  "description": "Análisis de espectros RMN-1H y RMN-13C de compuestos orgánicos: dibujo con JSME, búsqueda por fórmula molecular y por nombre IUPAC, predicción, simulación y búsqueda en bases de datos (PubChem/HMDB, NMRShiftDB2).",
+  "type": "module",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "index-nmrshiftdb": "node scripts/build-nmrshiftdb.js",
+    "test": "node test/smoke.js"
+  },
+  "author": "Pedro González Beermann",
+  "license": "MIT",
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "express": "^5.1.0",
+    "nmr-processing": "22.25.6",
+    "openchemlib": "9.25.1"
+  }
+}
