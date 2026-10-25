@@ -13,9 +13,13 @@ import { getCachedPrediction, setCachedPrediction } from '../db.js';
 import { hoseReady, predictLocal } from './hose.js';
 
 const r = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
-// Tolerancia por defecto |Δδ| (ppm): una señal coincide sólo si cae dentro de esta ventana
-export const TOL = { '1H': 0.08, '13C': 2.0 };
+// Criterio de aceptación de desplazamientos: desviación estándar (DE) de los errores
+// δ(candidato) − δ(experimental) de las señales asignadas ≤ SD_MAX (ppm).
+// La DE no castiga un desplazamiento sistemático común a todas las señales (p. ej. por el disolvente);
+// ese sesgo (error medio) se penaliza aparte de forma suave con OFFSET.
+export const SD_MAX = { '1H': 0.1, '13C': 1.5 };
 export const MIN_SCORE = 90;
+const OFFSET = { '1H': 0.25, '13C': 3 };
 const MARGIN = { '1H': 0.3, '13C': 5 };
 
 /** Nº de H vecinos implicado por una multiplicidad (regla n+1): t → 2, dd → 2, q → 3… ('m' → desconocido). */
@@ -37,11 +41,23 @@ function vicinalH(mol, a) {
   return n;
 }
 
+/** Media y desviación estándar muestral (n − 1) de una lista de errores. */
+export function errorStats(errs) {
+  const n = errs.length;
+  if (!n) return { n: 0, mean: null, sd: null, rmse: null };
+  const mean = errs.reduce((a, b) => a + b, 0) / n;
+  // Con una sola señal la DE no está definida: se usa el valor absoluto del error
+  const sd = n > 1 ? Math.sqrt(errs.reduce((a, e) => a + (e - mean) ** 2, 0) / (n - 1)) : Math.abs(errs[0]);
+  const rmse = Math.sqrt(errs.reduce((a, e) => a + e * e, 0) / n);
+  return { n, mean, sd, rmse };
+}
+
 /**
  * @param exp [{delta, w}] señales experimentales (w = fracción de la integral)
  * @param cand [{delta, n}] señales del candidato (n = nº de H o de C)
+ * @param sdMax desviación estándar máxima aceptada para los errores (ppm)
  */
-export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = null, expTotalH = null, tol = TOL[nucleus] } = {}) {
+export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = null, expTotalH = null, sdMax = SD_MAX[nucleus] } = {}) {
   let c = cand;
   if (rangeOnly) {
     const lo = Math.min(...exp.map((e) => e.delta)) - MARGIN[nucleus];
@@ -51,9 +67,8 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
   if (!c.length || !exp.length) return null;
   const sumN = c.reduce((a, x) => a + x.n, 0) || 1;
   const f = c.map((x) => x.n / sumN);
-  // Ventana estricta: una señal coincide sólo si |Δδ| ≤ tolerancia (en valor absoluto)
-  const within = (d) => d <= tol + 1e-9;
-  const sim = (d, x) => (within(d) ? (x?.credit ?? 1) : 0);
+  const off = OFFSET[nucleus];
+  const gauss = (d, s) => Math.exp(-0.5 * (d / s) ** 2);
 
   // Asignación uno a uno (voraz): cada señal experimental a una señal distinta del candidato.
   // El coste combina la diferencia de desplazamiento con el desacuerdo de multiplicidad e integración,
@@ -61,7 +76,7 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
   const pairs = [];
   for (let i = 0; i < exp.length; i++) {
     for (let j = 0; j < c.length; j++) {
-      let cost = Math.abs(exp[i].delta - c[j].delta) / tol;
+      let cost = Math.abs(exp[i].delta - c[j].delta) / off;
       if (exp[i].nb !== null && exp[i].nb !== undefined && c[j].nb !== null && c[j].nb !== undefined) cost += 0.6 * Math.min(2, Math.abs(exp[i].nb - c[j].nb));
       if (nucleus === '1H') cost += 2 * Math.abs(exp[i].w - f[j]);
       pairs.push([i, j, cost]);
@@ -76,7 +91,19 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
       cj[j] = i;
     }
   }
+
+  // Errores de las señales asignadas (los OH/NH intercambiables supuestos no tienen δ predicho: se excluyen)
+  const errs = [];
+  exp.forEach((e, i) => {
+    if (ei[i] >= 0 && !c[ei[i]].credit) errs.push(c[ei[i]].delta - e.delta);
+  });
+  const st = errorStats(errs);
+  const sdOk = st.sd !== null && st.sd <= sdMax + 1e-9;
+  // Similitud de cada señal: residuo respecto del error medio, con la DE máxima como escala
+  const simPair = (x, e) => (x.credit ? x.credit : gauss(x.delta - e.delta - (st.mean ?? 0), sdMax));
+  const offsetFactor = st.mean === null ? 1 : gauss(st.mean, off);
   const nearest = (d0, list) => list.reduce((m, x) => Math.min(m, Math.abs(x.delta - d0)), Infinity);
+
   let shift = 0;
   let integErr = 0;
   let multSum = 0;
@@ -85,8 +112,7 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
   exp.forEach((e, i) => {
     if (ei[i] >= 0) {
       const x = c[ei[i]];
-      const d = Math.abs(x.delta - e.delta);
-      shift += e.w * sim(d, x);
+      shift += e.w * simPair(x, e);
       integErr += Math.abs(e.w - f[ei[i]]);
       let multOk = null;
       if (e.nb !== null && e.nb !== undefined && x.nb !== null && x.nb !== undefined) {
@@ -98,25 +124,25 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
       matches.push({
         experimental: e.delta,
         candidate: r(x.delta, 2),
-        diff: r(x.delta - e.delta, 3),
-        within: within(d),
+        diff: x.credit ? null : r(x.delta - e.delta, 3),
         n: x.n,
         expectedNeighbors: x.nb ?? null,
         multiplicityOk: multOk,
         note: x.note || null,
       });
     } else {
-      // Señal sobrante: crédito parcial si cae dentro de la ventana de una señal ya asignada (multiplete desdoblado)
-      shift += 0.4 * e.w * sim(nearest(e.delta, c));
+      // Señal sobrante: crédito parcial si cae cerca de una señal ya asignada (multiplete desdoblado)
+      shift += 0.4 * e.w * gauss(nearest(e.delta, c), off);
       integErr += e.w;
-      matches.push({ experimental: e.delta, candidate: null, diff: null, within: false, n: null, note: 'sin señal propia en el candidato' });
+      matches.push({ experimental: e.delta, candidate: null, diff: null, n: null, note: 'sin señal propia en el candidato' });
     }
   });
+  shift *= offsetFactor;
   let coverage = 0;
   c.forEach((x, j) => {
-    if (cj[j] >= 0) coverage += f[j] * sim(Math.abs(x.delta - exp[cj[j]].delta), x);
+    if (cj[j] >= 0) coverage += f[j] * simPair(x, exp[cj[j]]);
     else {
-      coverage += 0.4 * f[j] * sim(nearest(x.delta, exp));
+      coverage += 0.4 * f[j] * gauss(nearest(x.delta, exp), off);
       integErr += f[j];
     }
   });
@@ -150,8 +176,12 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
     signalCount: r(count * 100, 1),
     hAgreement: hAgreement === null ? null : r(hAgreement * 100, 1),
     multiplicity: multiplicity === null ? null : r(multiplicity * 100, 1),
-    unexplained: c.filter((x, j) => cj[j] < 0 || !within(Math.abs(x.delta - exp[cj[j]].delta))).map((x) => r(x.delta, 2)),
-    matched: matches.filter((m) => m.within).length,
+    errorSd: st.sd === null ? null : r(st.sd, 3),
+    errorMean: st.mean === null ? null : r(st.mean, 3),
+    errorRmse: st.rmse === null ? null : r(st.rmse, 3),
+    nErrors: st.n,
+    sdOk,
+    unexplained: c.filter((x, j) => cj[j] < 0).map((x) => r(x.delta, 2)),
     matches,
   };
 }
@@ -171,7 +201,8 @@ const hCount = (formula) => Number(String(formula || '').match(/H(\d*)(?![a-z])/
  * Si el candidato los tiene y el espectro muestra un singlete sin asignar, se
  * considera una posible señal intercambiable (con crédito parcial).
  */
-function withExchangeable(exp, candSignals, smiles, nucleus, totalH, tol = TOL['1H']) {
+function withExchangeable(exp, candSignals, smiles, nucleus, totalH) {
+  const tol = OFFSET['1H'];
   if (nucleus !== '1H' || !smiles) return null;
   let exch = 0;
   try {
@@ -222,9 +253,9 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-export async function findCandidates(analysis, { formula = null, rangeOnly = false, maxResults = 15, maxPredict = 6, maxPubchem = 150, tolerance = null, minScore = MIN_SCORE } = {}) {
+export async function findCandidates(analysis, { formula = null, rangeOnly = false, maxResults = 15, maxPredict = 6, maxPubchem = 150, sdMax = null, minScore = MIN_SCORE } = {}) {
   const nucleus = analysis.nucleus;
-  const tol = Number(tolerance) > 0 ? Number(tolerance) : TOL[nucleus];
+  const sdLimit = Number(sdMax) > 0 ? Number(sdMax) : SD_MAX[nucleus];
   const exp = expSignals(analysis);
   // Sólo cuando el usuario fijó los nH de cada multiplete se compara el nº total de H
   const expTotalH = nucleus === '1H' && analysis.userIntegrals ? analysis.signals.reduce((a, s) => a + (s.nH || 0), 0) : null;
@@ -232,7 +263,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
   const results = [];
   const score = (signals, f, smiles) => {
     const totalH = hCount(f);
-    const base = concordance(exp, signals, nucleus, { rangeOnly, totalH, expTotalH, tol });
+    const base = concordance(exp, signals, nucleus, { rangeOnly, totalH, expTotalH, sdMax: sdLimit });
     return { base, totalH, smiles, signals };
   };
   // 2.ª pasada: multiplicidades esperadas (desde la estructura) y OH/NH intercambiables
@@ -244,14 +275,14 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
         const mol = OCL.Molecule.fromMolfile(getMolfile(x.id));
         mol.ensureHelperArrays(OCL.Molecule.cHelperNeighbours);
         signals = signals.map((s) => ({ ...s, nb: s.atoms?.length ? vicinalH(mol, s.atoms[0]) : null }));
-        base = concordance(exp, signals, nucleus, { rangeOnly, totalH: x.totalH, expTotalH, tol }) || base;
+        base = concordance(exp, signals, nucleus, { rangeOnly, totalH: x.totalH, expTotalH, sdMax: sdLimit }) || base;
       } catch {
         /* sin multiplicidades */
       }
     }
-    const ext = withExchangeable(exp, signals, x.smiles, nucleus, x.totalH, tol);
+    const ext = withExchangeable(exp, signals, x.smiles, nucleus, x.totalH);
     if (!ext) return base;
-    const c2 = concordance(exp, ext, nucleus, { rangeOnly, totalH: x.totalH, expTotalH, tol });
+    const c2 = concordance(exp, ext, nucleus, { rangeOnly, totalH: x.totalH, expTotalH, sdMax: sdLimit });
     return c2 && c2.score > base.score ? { ...c2, exchangeable: true } : base;
   };
 
@@ -399,9 +430,13 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
   }
   const ranked = [...merged.values()].sort((a, b) => b.score - a.score);
   // Sólo se muestran los candidatos con concordancia ≥ minScore
-  const top = ranked.filter((x) => x.score >= minScore).slice(0, maxResults);
+  // Se muestran sólo los candidatos con DE de los errores ≤ sdLimit y concordancia ≥ minScore
+  const passes = (x) => x.sdOk && x.score >= minScore;
+  const top = ranked.filter(passes).slice(0, maxResults);
   // Si ninguno supera el umbral se informa del mejor candidato encontrado
-  const bestBelow = !top.length && ranked[0] ? { score: ranked[0].score, name: ranked[0].name || null, smiles: ranked[0].smiles, inchikey: ranked[0].inchikey } : null;
+  const bestBelow = !top.length && ranked[0]
+    ? { score: ranked[0].score, errorSd: ranked[0].errorSd, name: ranked[0].name || null, smiles: ranked[0].smiles, inchikey: ranked[0].inchikey }
+    : null;
   await attachNames(bestBelow ? [...top, bestBelow] : top);
   for (const t of top) {
     try {
@@ -412,15 +447,15 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
   }
   return {
     candidates: top,
-    params: { tolerance: tol, minScore },
+    params: { sdMax: sdLimit, minScore },
     evaluated: ranked.length,
-    belowThreshold: ranked.length - ranked.filter((x) => x.score >= minScore).length,
+    belowThreshold: ranked.length - ranked.filter(passes).length,
     bestBelow,
     searched: { nmrshiftdb: dbBest.size, predicted },
     warnings,
     method:
       nucleus === '1H'
-        ? `Una señal coincide sólo si |Δδ| ≤ ${tol} ppm. Concordancia = 35 % desplazamientos + 20 % cobertura de las señales del candidato + 15 % integración + 10 % nº de señales + 20 % multiplicidad (regla n+1). Se muestran los candidatos con concordancia ≥ ${minScore} %.`
-        : `Una señal coincide sólo si |Δδ| ≤ ${tol} ppm. Concordancia = 50 % desplazamientos + 50 % cobertura de los carbonos del candidato, corregida por el nº de señales. Se muestran los candidatos con concordancia ≥ ${minScore} %.`,
+        ? `Criterio de desplazamientos: la desviación estándar de los errores δ(candidato) − δ(experimental) de las señales asignadas debe ser ≤ ${sdLimit} ppm. Concordancia = 35 % desplazamientos + 20 % cobertura de las señales del candidato + 15 % integración + 10 % nº de señales + 20 % multiplicidad (regla n+1). Se muestran los candidatos que cumplen la DE y tienen concordancia ≥ ${minScore} %.`
+        : `Criterio de desplazamientos: la desviación estándar de los errores δ(candidato) − δ(experimental) debe ser ≤ ${sdLimit} ppm. Concordancia = 50 % desplazamientos + 50 % cobertura de los carbonos del candidato, corregida por el nº de señales. Se muestran los candidatos que cumplen la DE y tienen concordancia ≥ ${minScore} %.`,
   };
 }

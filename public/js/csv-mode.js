@@ -19,10 +19,10 @@ $('#btnCsvExample').addEventListener('click', async () => {
 
 $('#btnCsv').addEventListener('click', () => analyzeCsv());
 
-// Al elegir ¹³C se propone una tolerancia acorde (2 ppm)
+// Al elegir ¹³C se propone una DE máxima acorde (1.5 ppm)
 $('#csvNucleus').addEventListener('change', (e) => {
-  if (e.target.value === '13C' && Number($('#csvTolerance').value) < 0.5) $('#csvTolerance').value = 2;
-  if (e.target.value === '1H' && Number($('#csvTolerance').value) > 0.5) $('#csvTolerance').value = 0.08;
+  if (e.target.value === '13C' && Number($('#csvSdMax').value) < 0.5) $('#csvSdMax').value = 1.5;
+  if (e.target.value === '1H' && Number($('#csvSdMax').value) > 0.5) $('#csvSdMax').value = 0.1;
 });
 
 async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
@@ -41,7 +41,7 @@ async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
         formula: $('#csvFormula').value.trim(),
         excludeSolvent: $('#csvExcludeSolvent').checked,
         rangeOnly: $('#csvRangeOnly').checked,
-        tolerance: Number($('#csvTolerance').value) || null,
+        sdMax: Number($('#csvSdMax').value) || null,
         minScore: $('#csvMinScore').value === '' ? null : Number($('#csvMinScore').value),
         integrals,
         uploadId,
@@ -85,8 +85,10 @@ function candidateCard(x, k, isH) {
   const rows = x.matches
     .map((m) => {
       const cand = m.candidate === null ? '—' : `${fmt(m.candidate, 2)}${m.n ? ` <span class="muted">(${m.n}${isH ? 'H' : 'C'})</span>` : ''}`;
-      const mark = m.diff === null ? '' : m.within ? ' <span class="badge ok">✓</span>' : ' <span class="badge exp">fuera</span>';
-      const diff = m.diff === null ? `<span class="muted">${esc(m.note || '')}</span>` : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 3)}${mark}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
+      const diff =
+        m.diff === null
+          ? `<span class="muted">${esc(m.note || '')}</span>`
+          : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 3)}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
       return `<tr><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
     })
     .join('');
@@ -98,13 +100,19 @@ function candidateCard(x, k, isH) {
     <div class="muted" style="font-size:.8rem">${esc(x.formula || '')}${x.solvent ? ` · espectro en ${esc(x.solvent)}` : ''}</div>
     <div><span class="pct" style="color:${scoreColor(x.score)}">${fmt(x.score, 1)} %</span> de concordancia</div>
     <div class="meter"><span style="width:${Math.max(2, x.score)}%;background:${scoreColor(x.score)}"></span></div>
+    ${
+      x.errorSd !== null && x.errorSd !== undefined
+        ? `<div style="font-size:.85rem"><b>DE del error de δ: ${fmt(x.errorSd, 3)} ppm</b> ${x.sdOk ? '<span class="badge ok">≤ límite</span>' : '<span class="badge exp">> límite</span>'}
+           <span class="muted">· error medio ${x.errorMean > 0 ? '+' : ''}${fmt(x.errorMean, 3)} ppm · ${x.nErrors} señales</span></div>`
+        : ''
+    }
     <div class="breakdown">Desplazamientos ${fmt(x.shift, 0)} % · Cobertura ${fmt(x.coverage, 0)} %${
       x.integration !== null ? ` · Integración ${fmt(x.integration, 0)} %` : ''
     } · Nº de señales ${fmt(x.signalCount, 0)} %${x.multiplicity !== null && x.multiplicity !== undefined ? ` · Multiplicidad ${fmt(x.multiplicity, 0)} %` : ''}${
       x.exchangeable ? ' · incluye OH/NH intercambiable' : ''
     }</div>
     <details><summary>Señales comparadas</summary>
-      <table><thead><tr><th>δ exp.</th><th>δ candidato</th><th>Δδ (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>δ exp.</th><th>δ candidato</th><th>Error (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
       ${x.unexplained?.length ? `<p class="muted" style="font-size:.8rem">Señales del candidato sin correspondencia: ${x.unexplained.join(', ')} ppm</p>` : ''}
     </details>
     <div class="btns" style="margin-top:auto">
@@ -157,8 +165,8 @@ function renderUploadResult(u) {
   </section>`);
 
   const minScore = c.params?.minScore ?? 90;
-  const tolTxt = c.params?.tolerance ?? (isH ? 0.08 : 2);
-  parts.push(`<h2 class="section-title">Estructuras candidatas con concordancia ≥ ${minScore} % (${c.candidates.length})</h2>
+  const sdTxt = c.params?.sdMax ?? (isH ? 0.1 : 1.5);
+  parts.push(`<h2 class="section-title">Estructuras candidatas: DE del error ≤ ${sdTxt} ppm y concordancia ≥ ${minScore} % (${c.candidates.length})</h2>
     <p class="muted" style="font-size:.85rem">${esc(c.method || '')} Se compararon ${c.searched?.nmrshiftdb ?? 0} compuestos de NMRShiftDB2${
       c.searched?.predicted ? ` y ${c.searched.predicted} espectros predichos de compuestos de PubChem` : ''
     }. ${u.formula ? '' : '<b>Sin fórmula molecular la búsqueda es muy amplia: indíquela para afinar los resultados.</b>'}</p>`);
@@ -166,9 +174,9 @@ function renderUploadResult(u) {
   if (!c.candidates.length) {
     const b = c.bestBelow;
     parts.push(
-      `<div class="warn">Ninguna estructura alcanza el ${minScore} % de concordancia con |Δδ| ≤ ${tolTxt} ppm.${
-        b ? ` La mejor encontrada fue <b>${esc(b.name || b.smiles)}</b> con ${fmt(b.score, 1)} %.` : ''
-      } Puede indicar la fórmula molecular, corregir los nH, ampliar la tolerancia o bajar la concordancia mínima.</div>`,
+      `<div class="warn">Ninguna estructura cumple a la vez DE del error ≤ ${sdTxt} ppm y concordancia ≥ ${minScore} %.${
+        b ? ` La mejor encontrada fue <b>${esc(b.name || b.smiles)}</b> con ${fmt(b.score, 1)} % (DE ${fmt(b.errorSd, 3)} ppm).` : ''
+      } Puede indicar la fórmula molecular, corregir los nH, ampliar la DE máxima o bajar la concordancia mínima.</div>`,
     );
   }
   parts.push(`<div class="cands">${c.candidates.map((x, k) => candidateCard(x, k, isH)).join('')}</div>`);
