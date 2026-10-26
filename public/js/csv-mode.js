@@ -74,6 +74,7 @@ function signalRow(u, s, i, isH) {
     <td>${esc(s.multiplicity)}<br><span class="muted">${esc(s.multiplicityName)}</span></td>
     <td class="num">${J}</td>
     <td class="num">${s.nLines}</td>
+    <td class="num">${fmt((s.fraction ?? 0) * 100, 1)}</td>
     <td><input class="nh" type="number" min="0.5" step="0.5" value="${s.nH}" data-i="${i}"></td>
     <td class="explain">${esc(s.region)}${s.solvent ? ' <span class="badge calc">disolvente</span>' : ''}</td></tr>`;
 }
@@ -128,8 +129,8 @@ function renderUploadResult(u) {
   const isH = u.nucleus === '1H';
   const c = u.candidates || { candidates: [] };
   const head = isH
-    ? '<th>δ (ppm)</th><th>Intervalo</th><th>Multiplicidad</th><th>J (Hz)</th><th>Líneas</th><th>nH</th><th>Región</th>'
-    : '<th>δ (ppm)</th><th>Intensidad</th><th>Región</th>';
+    ? '<th>δ (ppm)</th><th>Intervalo</th><th>Multiplicidad</th><th>J (Hz)</th><th>Líneas</th><th>Área (%)</th><th>nH</th><th>Región</th>'
+    : '<th>δ (ppm)</th><th>Intensidad por área (%)</th><th>Región</th>';
   const parts = [];
   parts.push(`<section class="panel spectrum experimental">
     <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (CSV)</span>

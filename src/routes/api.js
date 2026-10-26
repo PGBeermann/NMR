@@ -165,7 +165,7 @@ api.post(
       solvent,
       formula,
       raw: String(b.csv).slice(0, 2_000_000),
-      peaks: peaks.map((p) => ({ ppm: p.ppm, intensity: p.intensity })),
+      peaks: peaks.map((p) => ({ ppm: p.ppm, intensity: p.intensity, ...(p.area !== null && p.area !== undefined ? { area: p.area } : {}) })),
       analysis,
       candidates: cands,
     };
@@ -221,7 +221,7 @@ api.get('/uploads/:id/export', (req, res) => {
       ['# Formula', u.formula || ''],
       [],
       ['MULTIPLETES'],
-      ['delta_ppm', 'desde', 'hasta', 'multiplicidad', 'J_Hz', 'nH', 'fraccion_integral', 'n_lineas', 'region'],
+      ['delta_ppm', 'desde', 'hasta', 'multiplicidad', 'J_Hz', 'nH', 'fraccion_area', 'n_lineas', 'region'],
       ...(u.analysis?.signals || []).map((s) => [s.delta, s.from ?? '', s.to ?? '', s.multiplicity ?? '', (s.J || []).join(' / '), s.nH ?? '', s.fraction ?? '', s.nLines ?? '', s.region]),
       [],
       ['CANDIDATOS'],

@@ -139,3 +139,7 @@ input.nh { width: 64px; padding: 3px 5px; }
 .cand.selected { border: 2px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .selected-cand { border-left: 4px solid var(--accent); background: var(--accent-soft); margin-top: 18px; }
 #candAnalysis:empty { display: none; }
+
+/* Espectros experimentales a pedido */
+.exp-buttons { margin: 6px 0 2px; }
+.exp-group { margin-top: 10px; }

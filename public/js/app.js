@@ -352,17 +352,58 @@ function renderResults(r, target = '#results', header = '') {
   const others = r.spectra.filter((x) => x.kind !== 'predicho');
   if (predicted.length) parts.push('<h2 class="section-title">Espectros predichos y análisis</h2>');
   for (const sp of predicted) parts.push(renderSpectrum(sp));
-  parts.push(`<h2 class="section-title">Espectros en bases de datos (${others.length})</h2>`);
+  // Espectros experimentales de las bases de datos: no se muestran hasta que el usuario los pide,
+  // y se ofrecen por separado para ¹H y ¹³C
+  const uid = `g${++expGroupSeq}`;
+  const groups = { '1H': others.filter((x) => x.nucleus === '1H'), '13C': others.filter((x) => x.nucleus === '13C') };
+  expGroups.set(uid, groups);
+  parts.push(`<h2 class="section-title">Espectros experimentales en bases de datos (${others.length})</h2>`);
   if (!others.length) parts.push('<p class="muted">No se encontraron espectros experimentales para este compuesto en PubChem ni en NMRShiftDB2.</p>');
+  else {
+    const btn = (nuc) =>
+      groups[nuc].length
+        ? `<button class="exp-toggle" data-uid="${uid}" data-nuc="${nuc}" aria-expanded="false">Mostrar espectros experimentales de ${NUC[nuc]} RMN (${groups[nuc].length})</button>`
+        : `<button disabled title="No hay espectros de ${NUC[nuc]} en las bases de datos">${NUC[nuc]} RMN: sin espectros</button>`;
+    parts.push(`<div class="btns exp-buttons">${btn('1H')}${btn('13C')}</div>
+      <p class="hint">Los espectros experimentales (PubChem/HMDB, SpectraBase, NMRShiftDB2) se muestran sólo al pulsar el botón del núcleo correspondiente.</p>
+      <div class="exp-group hidden" id="exp-${uid}-1H"></div>
+      <div class="exp-group hidden" id="exp-${uid}-13C"></div>`);
+  }
   if (info.pubchemLinks?.length)
     parts.push(
       `<p class="muted">Otras referencias: ${info.pubchemLinks
         .map((l) => (l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.text)}</a>` : esc(l.text)))
         .join(' · ')}</p>`,
     );
-  for (const sp of others) parts.push(renderSpectrum(sp));
   $(target).innerHTML = header + parts.join('\n');
   bindSpectrumControls();
+  bindExperimentalToggles($(target));
+}
+
+const expGroups = new Map();
+let expGroupSeq = 0;
+
+function bindExperimentalToggles(root) {
+  root.querySelectorAll('.exp-toggle').forEach((b) =>
+    b.addEventListener('click', () => {
+      const { uid, nuc } = b.dataset;
+      const box = document.getElementById(`exp-${uid}-${nuc}`);
+      const open = box.classList.contains('hidden');
+      if (open && !box.dataset.rendered) {
+        // Se dibujan (y se piden las imágenes) sólo la primera vez que se solicitan
+        const list = expGroups.get(uid)?.[nuc] || [];
+        box.innerHTML = `<h3 class="section-title" style="font-size:1rem">Espectros experimentales de ${NUC[nuc]} RMN (${list.length})</h3>${list.map((sp) => renderSpectrum(sp)).join('\n')}`;
+        box.dataset.rendered = '1';
+        bindSpectrumControls();
+      }
+      box.classList.toggle('hidden', !open);
+      b.setAttribute('aria-expanded', String(open));
+      b.classList.toggle('primary', open);
+      const n = expGroups.get(uid)?.[nuc]?.length ?? 0;
+      b.textContent = `${open ? 'Ocultar' : 'Mostrar'} espectros experimentales de ${NUC[nuc]} RMN (${n})`;
+      if (open) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }),
+  );
 }
 
 function downloads(sp) {
@@ -495,14 +536,16 @@ function bindSpectrumControls() {
     };
     z.querySelector('.z-reset').onclick = () => setZoom(id);
   });
-  document.querySelectorAll('tr[data-zoom]').forEach((tr) =>
+  // Cada fila se enlaza una sola vez (la función se vuelve a llamar al desplegar espectros)
+  document.querySelectorAll('tr[data-zoom]:not([data-bound])').forEach((tr) => {
+    tr.dataset.bound = '1';
     tr.addEventListener('click', () => {
       const ppm = Number(tr.dataset.ppm);
       const w = Number(tr.dataset.width) || 0.25;
       setZoom(tr.dataset.zoom, +(ppm - w).toFixed(3), +(ppm + w).toFixed(3));
       $(`#img-${tr.dataset.zoom}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }),
-  );
+    });
+  });
 }
 
 refreshStatus();

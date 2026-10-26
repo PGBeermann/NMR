@@ -18,6 +18,8 @@ export function parsePeakCsv(text) {
   let ppmCol = 0;
   let intCol = 1;
   let hzCol = -1;
+  let areaCol = -1;
+  let widthCol = -1;
   for (const line of lines) {
     const cells = (sep ? line.split(sep) : line.split(/\s+/)).map((c) => c.trim().replace(/^"|"$/g, ''));
     const nums = cells.map((c) => {
@@ -25,29 +27,92 @@ export function parsePeakCsv(text) {
       return /^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test(v) ? Number(v) : NaN;
     });
     if (nums.every((n) => Number.isNaN(n))) {
-      // Encabezado: localizar columnas de ppm e intensidad
-      const lc = cells.map((c) => c.toLowerCase());
-      const pi = lc.findIndex((c) => /ppm|shift|δ|delta|despl/.test(c));
-      const ii = lc.findIndex((c) => /int|height|altura|amp|area|área/.test(c));
-      const hi = lc.findIndex((c) => /^hz$|frec|freq/.test(c));
-      if (pi >= 0) ppmCol = pi;
-      if (ii >= 0) intCol = ii;
-      if (hi >= 0) hzCol = hi;
+      // Encabezado: anchura y área se reconocen antes que la altura ("Integral" es área, no altura)
+      const kind = (c) => {
+        if (/w1\/2|w½|width|ancho|anchura|fwhm|^lw\b/.test(c)) return 'width';
+        if (/área|area|integral|integr/.test(c)) return 'area';
+        if (/height|altura|amp|intens|^int\.?$|^int\b|^i$/.test(c)) return 'height';
+        if (/ppm|shift|δ|delta|despl/.test(c)) return 'ppm';
+        if (/^hz$|^\(hz\)$|frec|freq|^ν/.test(c)) return 'hz';
+        return null;
+      };
+      cells.map((c) => c.toLowerCase()).forEach((c, i) => {
+        const k = kind(c);
+        if (k === 'ppm') ppmCol = i;
+        if (k === 'height') intCol = i;
+        if (k === 'hz') hzCol = i;
+        if (k === 'area' && areaCol < 0) areaCol = i;
+        if (k === 'width' && widthCol < 0) widthCol = i;
+      });
+      // Si sólo hay columna de área (sin altura), se usa también como intensidad
+      if (areaCol >= 0 && intCol === areaCol) intCol = -1;
       continue;
     }
     const ppm = nums[ppmCol];
     if (!Number.isFinite(ppm)) continue;
-    const inten = Number.isFinite(nums[intCol]) ? Math.abs(nums[intCol]) : 1;
-    peaks.push({ ppm, intensity: inten, hz: hzCol >= 0 ? nums[hzCol] : null });
+    const area = areaCol >= 0 && Number.isFinite(nums[areaCol]) ? Math.abs(nums[areaCol]) : null;
+    const width = widthCol >= 0 && Number.isFinite(nums[widthCol]) ? Math.abs(nums[widthCol]) : null;
+    let height = intCol >= 0 && Number.isFinite(nums[intCol]) ? Math.abs(nums[intCol]) : null;
+    if (height === null) height = area ?? 1;
+    peaks.push({ ppm, height, area, width, hz: hzCol >= 0 ? nums[hzCol] : null });
   }
   if (!peaks.length) throw Object.assign(new Error('No se encontraron picos válidos (columnas: ppm, intensidad).'), { status: 400 });
   peaks.sort((a, b) => b.ppm - a.ppm);
-  const max = Math.max(...peaks.map((p) => p.intensity)) || 1;
-  const out = peaks.map((p) => ({ ppm: p.ppm, intensity: r((p.intensity / max) * 100, 2) }));
+  const max = Math.max(...peaks.map((p) => p.height)) || 1;
+  const hasArea = peaks.every((p) => p.area !== null);
+  const hasWidth = !hasArea && peaks.every((p) => p.width !== null && p.width > 0);
+  const out = peaks.map((p) => ({
+    ppm: p.ppm,
+    intensity: r((p.height / max) * 100, 2),
+    // Área bruta de la línea si el archivo la trae (área o altura × anchura)
+    area: hasArea ? p.area : hasWidth ? p.height * p.width : null,
+    width: p.width,
+  }));
   // Si la tabla trae una columna en Hz, la frecuencia del espectrómetro es Hz/ppm
   const ratios = peaks.filter((p) => Number.isFinite(p.hz) && Math.abs(p.ppm) > 0.5).map((p) => p.hz / p.ppm).sort((a, b) => a - b);
   out.frequency = ratios.length ? Math.round(ratios[Math.floor(ratios.length / 2)]) : null;
+  out.areaSource = hasArea ? 'columna de área del archivo' : hasWidth ? 'altura × anchura (W½) del archivo' : null;
   return out;
+}
+
+/**
+ * Áreas de las líneas cuando el archivo sólo trae alturas: cada línea se modela como una
+ * lorentziana de anchura común y se resuelve el solapamiento entre líneas cercanas
+ * (deconvolución no negativa), de modo que el área de cada línea es proporcional a su
+ * amplitud real y no a la altura aparente.
+ */
+export function estimateAreas(lines, freq, widthHz) {
+  const n = lines.length;
+  if (n === 1) return [lines[0].intensity * widthHz];
+  const x = lines.map((l) => l.ppm * freq);
+  const h = lines.map((l) => l.intensity);
+  const L = (d) => 1 / (1 + ((2 * d) / widthHz) ** 2);
+  const a = h.slice();
+  for (let it = 0; it < 300; it++) {
+    let change = 0;
+    for (let i = 0; i < n; i++) {
+      let s = h[i];
+      for (let j = 0; j < n; j++) if (j !== i) s -= a[j] * L(x[i] - x[j]);
+      const v = Math.max(0, s);
+      change += Math.abs(v - a[i]);
+      a[i] = v;
+    }
+    if (change < 1e-6) break;
+  }
+  // Área de una lorentziana = π/2 · amplitud · anchura (la constante se cancela al normalizar)
+  return a.map((v) => v * widthHz);
+}
+
+/** Anchura de línea común estimada (Hz): algo menor que la menor separación entre líneas resueltas. */
+export function estimateLineWidth(peaks, freq) {
+  const hz = peaks.map((p) => p.ppm * freq).sort((a, b) => a - b);
+  let min = Infinity;
+  for (let i = 1; i < hz.length; i++) {
+    const d = hz[i] - hz[i - 1];
+    if (d > 0.05 && d < min) min = d;
+  }
+  if (!Number.isFinite(min)) return 1;
+  return Math.min(1.5, Math.max(0.3, 0.6 * min));
 }
 
 export function detectNucleus(peaks) {
@@ -150,17 +215,28 @@ export function analyzePeaks(
   const solventShifts = nucleus === '1H' ? [...solv.H, ...(solv.water ? [solv.water] : [])] : solv.C;
   const notes = [];
 
+  // Origen de las áreas: columna del archivo, altura × anchura, o estimación lorentziana
+  const fileAreas = peaks.length && peaks.every((p) => p.area !== null && p.area !== undefined);
+  const widthHz = fileAreas ? null : estimateLineWidth(peaks, frequency);
+  const areaSource = fileAreas
+    ? peaks.areaSource || 'columna de área del archivo'
+    : `estimada a partir de las alturas (líneas lorentzianas de anchura común ≈ ${widthHz.toFixed(2)} Hz, con deconvolución de las líneas solapadas)`;
+
   if (nucleus === '13C') {
+    const areas = fileAreas ? peaks.map((p) => p.area) : estimateAreas(peaks, frequency, widthHz);
+    const maxA = Math.max(...areas) || 1;
     const signals = peaks
-      .map((p) => ({
+      .map((p, i) => ({
         delta: r(p.ppm, 2),
-        intensity: p.intensity,
+        height: p.intensity,
+        intensity: r((areas[i] / maxA) * 100, 2),
         region: carbonRegion(p.ppm),
         solvent: solventShifts.some((s) => Math.abs(s - p.ppm) < 0.3),
       }))
       .filter((s) => !(excludeSolvent && s.solvent));
     if (signals.some((s) => s.solvent)) notes.push(`Hay señales que coinciden con el disolvente (${solvent}).`);
-    return { nucleus, frequency, signals, notes };
+    notes.push(`Intensidades por área (${areaSource}).`);
+    return { nucleus, frequency, signals, notes, areaSource };
   }
 
   const gap = gapHz / frequency;
@@ -171,11 +247,10 @@ export function analyzePeaks(
     else groups.push([p]);
   }
   let signals = groups.map((lines) => {
-    const total = lines.reduce((a, l) => a + l.intensity, 0) || 1;
-    const center = lines.reduce((a, l) => a + l.ppm * l.intensity, 0) / total;
-    // Área aproximada: suma de las alturas máximas de cada sub-pico (evita contar
-    // varias veces los hombros de la estructura fina)
-    const sum = mergeFine(lines, frequency, resolutionHz).reduce((a, g) => a + g.max, 0) || 1;
+    // Área de cada línea: la del archivo o la estimada (lorentzianas con deconvolución dentro del multiplete)
+    const lineAreas = fileAreas ? lines.map((l) => l.area) : estimateAreas(lines, frequency, widthHz);
+    const sum = lineAreas.reduce((a, v) => a + v, 0) || 1;
+    const center = lines.reduce((a, l, i) => a + l.ppm * lineAreas[i], 0) / sum;
     const fo = firstOrder(lines, frequency, resolutionHz);
     const width = (lines[0].ppm - lines[lines.length - 1].ppm) * frequency;
     return {
@@ -191,7 +266,7 @@ export function analyzePeaks(
       area: sum,
       region: protonRegion(center),
       solvent: lines.length <= 2 && solventShifts.some((s) => Math.abs(s - center) < 0.01),
-      lines: lines.map((l) => ({ ppm: l.ppm, hz: r(l.ppm * frequency, 2), intensity: l.intensity })),
+      lines: lines.map((l, i) => ({ ppm: l.ppm, hz: r(l.ppm * frequency, 2), intensity: l.intensity, area: lineAreas[i] })),
     };
   });
   const solventSignals = signals.filter((s) => s.solvent);
@@ -209,7 +284,7 @@ export function analyzePeaks(
   }
   if (excludeSolvent) signals = signals.filter((s) => !s.solvent);
 
-  // Integración relativa (las áreas se aproximan con la suma de alturas de las líneas)
+  // Integración relativa: suma de las áreas de las líneas de cada multiplete
   const minArea = Math.min(...signals.map((s) => s.area));
   const totalArea = signals.reduce((a, s) => a + s.area, 0);
   for (const s of signals) {
@@ -253,13 +328,17 @@ export function analyzePeaks(
     userIntegrals = true;
   } else {
     notes.push(
-      `Las integrales se estiman a partir de las alturas de las líneas (relación aproximada ${best.ints.join(' : ')}${
+      `Integrales por área: ${areaSource}. Relación aproximada ${best.ints.join(' : ')}${
         totalH ? `; repartiendo ${totalH} H: ${signals.map((s) => s.estimatedH).join(' : ')}` : ''
-      }). Las señales anchas (OH, NH) quedan subestimadas: puede corregir el nº de H de cada multiplete y recalcular.`,
+      }.${
+        fileAreas
+          ? ''
+          : ' Sin columna de área o de anchura (W½) en el archivo, las señales anchas (OH, NH) pueden quedar subestimadas: exporte la tabla con el área de cada pico o corrija el nº de H y recalcule.'
+      }`,
     );
   }
   for (const s of signals) delete s.area;
-  return { nucleus, frequency, signals, notes, ratio: best.ints.join(' : '), userIntegrals };
+  return { nucleus, frequency, signals, notes, ratio: best.ints.join(' : '), userIntegrals, areaSource };
 }
 
 /**
