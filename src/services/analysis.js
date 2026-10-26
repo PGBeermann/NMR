@@ -1,7 +1,7 @@
 // Núcleo del análisis: predicción, interpretación, búsqueda en bases de datos,
 // comparación predicho/experimental y guardado de los espectros.
 import { predict } from 'nmr-processing';
-import { OCL, atomMapping, moleculeInfo, moleculeSvg, parseMolecule } from './molecule.js';
+import { OCL, atomMapping, moleculeInfo, moleculeSvg, moleculeSvgLabeled, parseMolecule, signalLetter } from './molecule.js';
 import {
   SOLVENTS,
   carbonRegion,
@@ -142,6 +142,8 @@ function protonAnalysis(mol, prediction, frequency) {
   signals.forEach((s, i) => {
     s.relativeIntegration = ratio[i];
     s.explanation = explainProton(s);
+    // Letra que identifica la señal en la estructura, en el espectro y en la tabla
+    s.label = signalLetter(i);
   });
 
   const rawSignals = [...pred.signals, ...extraRaw].map((s) => ({
@@ -160,12 +162,30 @@ function protonAnalysis(mol, prediction, frequency) {
       if (!best || d < best.d) best = { d, s };
     }
     l.signal = best ? r2(best.s.delta, 2) : null;
+    l.label = best ? best.s.label : null;
   }
   const integrals = signals.map((s) => {
     const width = (s.js.reduce((a, j) => a + j.J * (j.nPartners || 1), 0) / 2 + 2.5) / frequency;
     return { from: r2(s.delta - width, 4), to: r2(s.delta + width, 4), nH: s.nH };
   });
   return { signals, lines, rawSignals, range, integrals };
+}
+
+/** Estructura con las letras de cada señal de ¹H en el átomo pesado que porta esos H. */
+export function protonAssignmentSvg(mol, signals) {
+  const labels = new Map();
+  for (const s of signals) {
+    for (const a of s.atoms || []) {
+      const i = a - 1;
+      if (!labels.has(i)) labels.set(i, []);
+      labels.get(i).push(s.label);
+    }
+  }
+  try {
+    return moleculeSvgLabeled(mol, labels, { id: `asg${Math.random().toString(36).slice(2, 8)}` });
+  } catch {
+    return null;
+  }
 }
 
 function explainProton(s) {
@@ -520,6 +540,8 @@ export async function analyze(input) {
       peaks: protonPred.lines,
       analysis: {
         literature: literatureString('1H', frequency, solvent, protonPred.signals),
+        // Estructura con las letras de las señales junto a los átomos que portan esos H
+        assignmentSvg: protonAssignmentSvg(mol, protonPred.signals),
         environments: hTypes,
         totalH: protonPred.signals.reduce((a, s) => a + s.nH, 0),
         integrationRatio: protonPred.signals.map((s) => s.relativeIntegration).join(' : '),

@@ -69,6 +69,7 @@ function signalRow(u, s, i, isH) {
   }
   const J = s.J.length ? s.J.join(', ') : s.apparentJ?.length ? `<span class="muted">aparentes: ${s.apparentJ.join(', ')}</span>` : '—';
   return `<tr class="clickable" data-uzoom="${u.id}" data-from="${s.from}" data-to="${s.to}">
+    <td>${letterBadge(s.label)}</td>
     <td class="num"><b>${fmt(s.delta, 3)}</b></td>
     <td class="num">${fmt(s.to, 3)}–${fmt(s.from, 3)}</td>
     <td>${esc(s.multiplicity)}<br><span class="muted">${esc(s.multiplicityName)}</span></td>
@@ -90,12 +91,13 @@ function candidateCard(x, k, isH) {
         m.diff === null
           ? `<span class="muted">${esc(m.note || '')}</span>`
           : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 3)}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
-      return `<tr><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
+      return `<tr><td>${letterBadge(m.label)}</td><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
     })
     .join('');
   return `<div class="cand">
     <div class="rank">#${k + 1} · ${badges}</div>
     <div class="mol">${x.svg || ''}</div>
+    ${x.labeled ? '<div class="hint" style="text-align:center;margin-top:-4px">Las letras indican el multiplete experimental asignado a los H de cada átomo.</div>' : ''}
     <h4>${esc(x.name || x.iupac || x.smiles)}</h4>
     ${x.iupac && x.iupac !== x.name ? `<div class="muted" style="font-size:.8rem">${esc(x.iupac)}</div>` : ''}
     <div class="muted" style="font-size:.8rem">${esc(x.formula || '')}${x.solvent ? ` · espectro en ${esc(x.solvent)}` : ''}</div>
@@ -113,7 +115,7 @@ function candidateCard(x, k, isH) {
       x.exchangeable ? ' · incluye OH/NH intercambiable' : ''
     }</div>
     <details><summary>Señales comparadas</summary>
-      <table><thead><tr><th>δ exp.</th><th>δ candidato</th><th>Error (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
+      <table><thead><tr><th>Señal</th><th>δ exp.</th><th>δ candidato</th><th>Error (ppm)</th></tr></thead><tbody>${rows}</tbody></table>
       ${x.unexplained?.length ? `<p class="muted" style="font-size:.8rem">Señales del candidato sin correspondencia: ${x.unexplained.join(', ')} ppm</p>` : ''}
     </details>
     <div class="btns" style="margin-top:auto">
@@ -129,7 +131,7 @@ function renderUploadResult(u) {
   const isH = u.nucleus === '1H';
   const c = u.candidates || { candidates: [] };
   const head = isH
-    ? '<th>δ (ppm)</th><th>Intervalo</th><th>Multiplicidad</th><th>J (Hz)</th><th>Líneas</th><th>Área (%)</th><th>nH</th><th>Región</th>'
+    ? '<th>Señal</th><th>δ (ppm)</th><th>Intervalo</th><th>Multiplicidad</th><th>J (Hz)</th><th>Líneas</th><th>Área (%)</th><th>nH</th><th>Región</th>'
     : '<th>δ (ppm)</th><th>Intensidad por área (%)</th><th>Región</th>';
   const parts = [];
   parts.push(`<section class="panel spectrum experimental">

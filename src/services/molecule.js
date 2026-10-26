@@ -75,6 +75,26 @@ export function moleculeSvg(mol, { width = 420, height = 320, numbers = true, id
   });
 }
 
+export const SIGNAL_LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
+export const signalLetter = (i) => (i < 26 ? SIGNAL_LETTERS[i] : SIGNAL_LETTERS[Math.floor(i / 26) - 1] + SIGNAL_LETTERS[i % 26]);
+
+/**
+ * Estructura con las letras de las señales de ¹H junto al átomo que porta esos H
+ * (p. ej. «a» en el CH₃ cuyo pico es la señal a). `labels`: Map átomo → [letras].
+ */
+export function moleculeSvgLabeled(mol, labels, { width = 440, height = 330, id = 'molL' } = {}) {
+  const m = mol.getCompactCopy();
+  for (const [a, ls] of labels) {
+    if (a >= 0 && a < m.getAllAtoms() && ls?.length) m.setAtomCustomLabel(a, `]${[...new Set(ls)].join(',')}`);
+  }
+  const svg = m.toSVG(width, height, id, { autoCrop: true, autoCropMargin: 28, suppressChiralText: true, noCarbonLabelWithCustomLabel: true });
+  // Las letras (minúsculas) se resaltan: negrita, mayor tamaño y color propio
+  return svg.replace(/<text([^>]*)>([a-z]{1,2}(?:,[a-z]{1,2})*)<\/text>/g, (all, attrs, txt) => {
+    const clean = attrs.replace(/\s(fill|font-size)="[^"]*"/g, '');
+    return `<text${clean} font-size="14" font-weight="bold" fill="rgb(31,78,156)">${txt}</text>`;
+  });
+}
+
 export function moleculeInfo(mol) {
   const f = mol.getMolecularFormula();
   const formula = f.formula;

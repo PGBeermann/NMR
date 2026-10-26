@@ -406,6 +406,34 @@ function bindExperimentalToggles(root) {
   );
 }
 
+/** Letra de señal resaltada. */
+function letterBadge(l) {
+  return l ? `<span class="sig-letter">${esc(l)}</span>` : '';
+}
+
+/**
+ * Estructura con las letras de las señales de ¹H junto a los átomos que portan esos H,
+ * acompañada de la leyenda letra → desplazamiento.
+ */
+function assignmentBlock(svg, signals, title = 'Asignación de los hidrógenos') {
+  if (!svg || !signals?.some((g) => g.label)) return '';
+  const legend = signals
+    .filter((g) => g.label)
+    .map(
+      (g) =>
+        `<li>${letterBadge(g.label)} <b>δ ${fmt(g.delta, 2)}</b> · ${esc(g.multiplicity || '')}${g.nH ? ` · ${g.nH}H` : ''}${
+          g.environment ? ` <span class="muted">— ${esc(g.environment)}</span>` : g.note ? ` <span class="muted">— ${esc(g.note)}</span>` : ''
+        }</li>`,
+    )
+    .join('');
+  return `<div class="assign">
+    <div class="assign-mol">${svg}</div>
+    <div><h4 style="margin:0 0 6px">${esc(title)}</h4>
+      <p class="hint" style="margin:0 0 6px">Cada letra señala el átomo que porta esos hidrógenos y el pico correspondiente del espectro.</p>
+      <ul class="assign-legend">${legend}</ul></div>
+  </div>`;
+}
+
 function downloads(sp) {
   const b = `/api/spectra/${sp.id}`;
   return `<div class="downloads">
@@ -460,11 +488,13 @@ function renderSpectrum(sp) {
   if (sp.analysis?.literature) body += `<p><b>Formato de publicación:</b></p><div class="literature">${esc(sp.analysis.literature)}</div>`;
 
   if (sp.kind === 'predicho' && sp.nucleus === '1H') {
+    body += assignmentBlock(sp.analysis.assignmentSvg, sp.signals);
     body += `<p><b>Relación de integrales:</b> ${esc(sp.analysis.integrationRatio)} (total ${sp.analysis.totalH} H, ${sp.analysis.environments} tipos de H)</p>
-    <div class="table-wrap"><table><thead><tr><th>δ (ppm)</th><th>Multiplicidad</th><th>J (Hz)</th><th>Integración</th><th>Átomo nº</th><th>Entorno / interpretación</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Señal</th><th>δ (ppm)</th><th>Multiplicidad</th><th>J (Hz)</th><th>Integración</th><th>Átomo nº</th><th>Entorno / interpretación</th></tr></thead><tbody>
     ${sp.signals
       .map(
         (g) => `<tr class="clickable" data-zoom="${sp.id}" data-ppm="${g.delta}">
+      <td>${letterBadge(g.label)}</td>
       <td class="num"><b>${fmt(g.delta, 2)}</b></td>
       <td>${esc(g.multiplicity)}<br><span class="muted">${esc(g.multiplicityName)}</span></td>
       <td class="num">${g.js.length ? g.js.map((j) => `${fmt(j.J, 1)}${j.bonds ? ` <span class="muted">(${j.bonds}J)</span>` : ''}`).join('<br>') : '—'}</td>
@@ -476,7 +506,7 @@ function renderSpectrum(sp) {
     </tbody></table></div>
     <details><summary>Lista de líneas del espectro simulado (${sp.peaks.length}) con intensidades</summary>
       <div class="table-wrap"><table><thead><tr><th>δ (ppm)</th><th>ν (Hz)</th><th>Intensidad relativa (%)</th><th>Señal</th></tr></thead><tbody>
-      ${sp.peaks.map((p) => `<tr><td class="num">${fmt(p.ppm, 4)}</td><td class="num">${fmt(p.hz, 2)}</td><td class="num">${fmt(p.intensity, 1)}</td><td class="num">${fmt(p.signal, 2)}</td></tr>`).join('')}
+      ${sp.peaks.map((p) => `<tr><td class="num">${fmt(p.ppm, 4)}</td><td class="num">${fmt(p.hz, 2)}</td><td class="num">${fmt(p.intensity, 1)}</td><td class="num">${p.label ? letterBadge(p.label) + ' ' : ''}${fmt(p.signal, 2)}</td></tr>`).join('')}
       </tbody></table></div></details>`;
   } else if (sp.kind === 'predicho') {
     const d = sp.analysis.dept;

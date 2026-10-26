@@ -6,7 +6,7 @@
 // del candidato e integración (sólo 1H).
 import { getAllSpectra, getMolfile } from './nmrshiftdb.js';
 import * as pubchem from './pubchem.js';
-import { OCL, moleculeSvg, parseMolecule } from './molecule.js';
+import { OCL, atomMapping, moleculeSvg, moleculeSvgLabeled, parseMolecule } from './molecule.js';
 import { runPrediction } from './analysis.js';
 import { describeHydrogenCarrier, parseMultiplicity } from './chemistry.js';
 import { getCachedPrediction, setCachedPrediction } from '../db.js';
@@ -162,6 +162,8 @@ function mergeIntoMultiplets(exp, cand, freq, margin = 0.05) {
       n,
       nb: null,
       shape,
+      atoms: list.flatMap((x) => x.atoms || []),
+      atomsFrame: list.find((x) => x.atomsFrame)?.atomsFrame,
       merged: list.map((x) => x.delta),
       note: `${list.length} señales del candidato (${list.map((x) => x.delta.toFixed(2)).join(', ')}) superpuestas en el multiplete; semejanza de forma ${Math.round(shape * 100)} %`,
     });
@@ -248,6 +250,9 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
         candidate: r(x.delta, 2),
         diff: x.credit ? null : r(x.delta - e.delta, 3),
         n: x.n,
+        label: e.label ?? null,
+        atoms: x.atoms || null,
+        atomsFrame: x.atomsFrame || null,
         expectedNeighbors: x.nb ?? null,
         multiplicityOk: multOk,
         note: x.note || null,
@@ -256,7 +261,7 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
       // Señal sobrante: crédito parcial si cae cerca de una señal ya asignada (multiplete desdoblado)
       shift += 0.4 * e.w * gauss(nearest(e.delta, c), off);
       integErr += e.w;
-      matches.push({ experimental: e.delta, candidate: null, diff: null, n: null, note: 'sin señal propia en el candidato' });
+      matches.push({ experimental: e.delta, candidate: null, diff: null, n: null, label: e.label ?? null, atoms: null, note: 'sin señal propia en el candidato' });
     }
   });
   shift *= offsetFactor;
@@ -323,6 +328,7 @@ function expSignals(analysis) {
     w: s.fraction,
     mult: s.multiplicity,
     nb: neighborsFromMultiplicity(s.multiplicity),
+    label: s.label,
     from: s.from,
     to: s.to,
     lines: s.lines,
@@ -341,9 +347,15 @@ function withExchangeable(exp, candSignals, smiles, nucleus, totalH) {
   const tol = OFFSET['1H'];
   if (nucleus !== '1H' || !smiles) return null;
   let exch = 0;
+  const exchAtoms = [];
   try {
     const mol = parseMolecule({ smiles });
-    for (let a = 0; a < mol.getAtoms(); a++) if ([7, 8, 16].includes(mol.getAtomicNo(a))) exch += mol.getAllHydrogens(a);
+    for (let a = 0; a < mol.getAtoms(); a++) {
+      if ([7, 8, 16].includes(mol.getAtomicNo(a)) && mol.getAllHydrogens(a)) {
+        exch += mol.getAllHydrogens(a);
+        exchAtoms.push(a);
+      }
+    }
   } catch {
     return null;
   }
@@ -374,7 +386,7 @@ function withExchangeable(exp, candSignals, smiles, nucleus, totalH) {
   if (!compatible.length) return null;
   const best = compatible.reduce((a, e) => (Math.abs(e.w - target) < Math.abs(a.w - target) ? e : a));
   // Crédito parcial (85 %): su posición depende de concentración y disolvente
-  return [...candSignals, { delta: best.delta, n: exch, nb: 0, credit: 0.85, note: 'OH/NH intercambiable (posible)' }];
+  return [...candSignals, { delta: best.delta, n: exch, nb: 0, credit: 0.85, atoms: exchAtoms, atomsFrame: 'smiles', note: 'OH/NH intercambiable (posible)' }];
 }
 
 async function attachNames(items) {
@@ -460,7 +472,8 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
     } catch {
       return null;
     }
-    const key = `v2:${mol.getIDCode()}`;
+    // v3: incluye los átomos pesados de cada señal (para dibujar la asignación)
+    const key = `v3:${mol.getIDCode()}`;
     let cached = getCachedPrediction(key);
     if (!cached) {
       if (nmriumState.limited) return null;
@@ -473,8 +486,11 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
       }
       // nb: nº de H vecinos con J ≥ 3 Hz (los acoplamientos menores no se resuelven en la práctica)
       const nbOf = (s) => (s.js || []).filter((jj) => jj.coupling >= 3).reduce((a, jj) => a + (neighborsFromMultiplicity(jj.multiplicity) ?? 1), 0);
-      const simp = (sp) => (sp ? sp.joinedSignals.map((s) => ({ delta: s.delta, n: s.nbAtoms, m: s.multiplicity || null, nb: nbOf(s) })) : []);
-      cached = { proton: simp(pr.spectra.proton), carbon: simp(pr.spectra.carbon) };
+      const mhP = pr.moleculeWithHydrogens;
+      const heavy = (s, isH) => [...new Set((s.atoms || []).map((a) => (isH ? mhP.getConnAtom(a, 0) : a)))];
+      const simp = (sp, isH) =>
+        sp ? sp.joinedSignals.map((s) => ({ delta: s.delta, n: s.nbAtoms, m: s.multiplicity || null, nb: nbOf(s), atoms: heavy(s, isH) })) : [];
+      cached = { proton: simp(pr.spectra.proton, true), carbon: simp(pr.spectra.carbon, false) };
       setCachedPrediction(key, cached.proton, cached.carbon);
     }
     nmriumState.used++;
@@ -482,6 +498,8 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
       delta: s.delta,
       n: s.n,
       nb: nucleus === '1H' ? (s.nb ?? neighborsFromMultiplicity(s.m)) : null,
+      atoms: s.atoms || null,
+      atomsFrame: 'smiles',
     }));
     const s = score(signals, p.formula, p.smiles);
     return s.base ? { ...refine(s), p, signals, method: 'nmrium' } : null;
@@ -534,7 +552,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
     for (const x of firstPass.slice(0, 40)) {
       let sig;
       try {
-        sig = predictLocal(parseMolecule({ smiles: x.smiles }), nucleus);
+        sig = predictLocal(parseMolecule({ smiles: x.smiles }), nucleus)?.map((q) => ({ ...q, atomsFrame: 'smiles' }));
       } catch {
         continue;
       }
@@ -582,7 +600,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
         for (const p of props) {
           let sig;
           try {
-            sig = predictLocal(parseMolecule({ smiles: p.smiles }), nucleus);
+            sig = predictLocal(parseMolecule({ smiles: p.smiles }), nucleus)?.map((q) => ({ ...q, atomsFrame: 'smiles' }));
           } catch {
             continue;
           }
@@ -651,9 +669,37 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
     ? { score: ranked[0].score, errorSd: ranked[0].errorSd, name: ranked[0].name || null, smiles: ranked[0].smiles, inchikey: ranked[0].inchikey }
     : null;
   await attachNames(bestBelow ? [...top, bestBelow] : top);
+  // Estructura de cada candidato con las letras de los multipletes experimentales asignados a sus átomos
   for (const t of top) {
+    const id = `c${Math.random().toString(36).slice(2, 8)}`;
     try {
-      t.svg = moleculeSvg(parseMolecule({ smiles: t.smiles }), { width: 240, height: 180, numbers: false, id: `c${Math.random().toString(36).slice(2, 8)}` });
+      const mol = parseMolecule({ smiles: t.smiles });
+      // Las señales de NMRShiftDB2 usan la numeración de su molfile: se traducen a la del SMILES
+      const dbId = t.sources?.length && t.matches?.some((m) => m.atoms?.length && m.atomsFrame !== 'smiles') ? t.nmrshiftdbId : null;
+      let map = null;
+      if (dbId) {
+        try {
+          const dbm = OCL.Molecule.fromMolfile(getMolfile(dbId));
+          dbm.removeExplicitHydrogens();
+          map = atomMapping(dbm, mol);
+        } catch {
+          map = null;
+        }
+      }
+      const labels = new Map();
+      for (const m of t.matches || []) {
+        if (!m.label || !m.atoms?.length) continue;
+        for (const a of m.atoms) {
+          const idx = m.atomsFrame === 'smiles' ? a : map ? map[a] : -1;
+          if (idx === undefined || idx === null || idx < 0) continue;
+          if (!labels.has(idx)) labels.set(idx, []);
+          labels.get(idx).push(m.label);
+        }
+      }
+      t.labeled = labels.size > 0;
+      t.svg = t.labeled
+        ? moleculeSvgLabeled(mol, labels, { width: 260, height: 200, id })
+        : moleculeSvg(mol, { width: 240, height: 180, numbers: false, id });
     } catch {
       t.svg = null;
     }

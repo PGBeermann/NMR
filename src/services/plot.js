@@ -52,7 +52,7 @@ export function spectrumSvg(o) {
   const from = o.from;
   const to = o.to;
   const color = o.color || '#1f4e9c';
-  const labelBand = o.labels?.length ? 92 : 20;
+  const labelBand = o.labels?.length ? (o.labels.some((l) => l.tag) ? 110 : 92) : 20;
   const integralBand = o.integrals?.length ? 30 : 0;
   const m = { l: 36, r: 30, t: 48 + labelBand, b: 52 + integralBand };
   const pw = W - m.l - m.r;
@@ -154,10 +154,17 @@ export function spectrumSvg(o) {
     for (const it of items) {
       const peakY = it.height !== undefined ? Y(it.height) - 4 : base - 10;
       const ly = bandBottom - 14;
+      // Con letra de señal: la letra va en negrita sobre la línea guía y el texto encima
+      const textY = it.tag ? ly - 21 : ly - 3;
       parts.push(
         `<path d="M${it.x.toFixed(1)},${Math.max(peakY, bandBottom).toFixed(1)} L${it.x.toFixed(1)},${bandBottom} L${it.lx.toFixed(1)},${ly}" fill="none" stroke="#999" stroke-width="0.7"/>`,
-        `<text transform="translate(${(it.lx + 3.5).toFixed(1)},${(ly - 3).toFixed(1)}) rotate(-90)" font-size="10.5" fill="#222">${esc(it.text)}</text>`,
+        `<text transform="translate(${(it.lx + 3.5).toFixed(1)},${textY.toFixed(1)}) rotate(-90)" font-size="10.5" fill="#222">${esc(it.text)}</text>`,
       );
+      if (it.tag) {
+        parts.push(
+          `<text x="${it.lx.toFixed(1)}" y="${(ly - 5).toFixed(1)}" font-size="13" font-weight="bold" fill="#1f4e9c" text-anchor="middle">${esc(it.tag)}</text>`,
+        );
+      }
     }
   }
 

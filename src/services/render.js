@@ -55,7 +55,7 @@ export function renderUpload(u, { from, to, width, height } = {}) {
     return m;
   };
   const labels = isH
-    ? sig.map((g) => ({ ppm: g.delta, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.from - 0.002, g.to + 0.002) }))
+    ? sig.map((g) => ({ ppm: g.delta, tag: g.label || null, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.from - 0.002, g.to + 0.002) }))
     : sig.map((g) => ({ ppm: g.delta, text: g.delta.toFixed(1), height: heightAt(g.delta - 0.2, g.delta + 0.2) }));
   const integrals = isH ? sig.map((g) => ({ from: g.from - 0.004, to: g.to + 0.004, text: `${g.nH}H` })) : [];
   return spectrumSvg({
@@ -99,7 +99,7 @@ export function renderSpectrum(s, compound, { from, to, width, height } = {}) {
   let integrals = [];
   let integralCurve = null;
   if (s.kind === 'predicho' && isH) {
-    labels = s.signals.map((g) => ({ ppm: g.delta, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.delta) }));
+    labels = s.signals.map((g) => ({ ppm: g.delta, tag: g.label || null, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.delta) }));
     integrals = (s.meta?.integrals || []).map((i) => ({ from: i.from, to: i.to, text: `${i.nH}H` }));
     if (xy) integralCurve = { x: xy.x, y: cumulativeIntegral(xy) };
   } else if (s.kind === 'predicho') {

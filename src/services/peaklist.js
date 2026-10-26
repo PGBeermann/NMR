@@ -1,6 +1,7 @@
 // Lectura de listas de picos (CSV) y análisis del espectro experimental:
 // agrupación en multipletes, centro, constantes J aparentes e integración relativa.
 import { carbonRegion, protonRegion, SOLVENTS, multiplicityName } from './chemistry.js';
+import { signalLetter } from './molecule.js';
 
 const r = (v, d = 3) => Math.round(v * 10 ** d) / 10 ** d;
 
@@ -315,6 +316,8 @@ export function analyzePeaks(
   }
   signals.forEach((s, i) => {
     s.integerIntegral = best.ints[i];
+    // Letra que identifica el multiplete en el espectro, en la tabla y en las estructuras candidatas
+    s.label = signalLetter(i);
     s.nH = s.estimatedH ?? s.integerIntegral;
   });
   // Integrales fijadas por el usuario (nº de H de cada multiplete)
