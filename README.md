@@ -36,7 +36,7 @@ PNG · SVG · **JCAMP-DX 5.01** (curva x/y y tabla de picos, con señales, J y m
 | [JSME](https://jsme-editor.github.io) | Editor de estructuras en el navegador |
 | [OpenChemLib](https://github.com/cheminfo/openchemlib-js) | Estructuras, fórmula, simetría (átomos diastereotópicos), dibujo numerado |
 
-> La predicción usa el servicio web público de NMRium; el servidor necesita salida a Internet. `nmr-processing` tiene licencia CC-BY-NC-SA 4.0 (uso académico/no comercial).
+> La predicción usa el servicio web público de NMRium; el servidor necesita salida a Internet. Si NMRium no responde (p. ej. porque limita el nº de consultas), el análisis usa automáticamente el **predictor local** de respaldo: desplazamientos por entornos tipo HOSE de NMRShiftDB2 y constantes J típicas (regla n+1); el espectro queda marcado como «Predicción local (HOSE/NMRShiftDB2, respaldo)». `nmr-processing` tiene licencia CC-BY-NC-SA 4.0 (uso académico/no comercial).
 
 ## Ejecución local
 Requiere Node.js ≥ 22.13 (recomendado 24).

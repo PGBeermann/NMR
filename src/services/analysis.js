@@ -16,6 +16,7 @@ import { carbonFrequency, pickLines, protonRange, simulateProton } from './spect
 import * as pubchem from './pubchem.js';
 import * as nmrshiftdb from './nmrshiftdb.js';
 import { getCompoundSpectra, upsertCompound, upsertSpectrum } from '../db.js';
+import { localPrediction } from './local-prediction.js';
 
 const r2 = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 const predictionCache = new Map();
@@ -441,12 +442,26 @@ export async function analyze(input) {
     return { props: null, synonyms: [], nmr: { spectra: [], links: [] } };
   });
 
-  const predictionTask = runPrediction(mol).catch((e) => {
+  // NMRium (con J calculadas); si no responde, predictor local de respaldo
+  const predictionTask = runPrediction(mol, { retries: 1 }).catch((e) => {
+    let local = null;
+    try {
+      local = localPrediction(mol);
+    } catch {
+      local = null;
+    }
+    if (local) {
+      warnings.push(
+        `El servicio de predicción NMRium no respondió (${e.message}). Se usó el predictor local (entornos HOSE de NMRShiftDB2): los desplazamientos son medias de compuestos con entornos iguales y las constantes J son valores típicos (³J ≈ 7 Hz alifático, 7.8 Hz aromático orto, 10 Hz vinílico).`,
+      );
+      return local;
+    }
     warnings.push(`Predicción no disponible: ${e.message}`);
     return null;
   });
 
   const [pc, prediction] = await Promise.all([pubchemTask, predictionTask]);
+  const predSource = prediction?.source === 'local' ? 'Predicción local (HOSE/NMRShiftDB2, respaldo)' : 'Predicción (nmr-processing / NMRium)';
   const inchikey = pc.props?.inchikey || input.inchikey || null;
 
   let dbEntries = [];
@@ -497,7 +512,7 @@ export async function analyze(input) {
     spectra.push({
       nucleus: '1H',
       kind: 'predicho',
-      source: 'Predicción (nmr-processing / NMRium)',
+      source: predSource,
       sourceId: '',
       frequency,
       solvent,
@@ -515,7 +530,9 @@ export async function analyze(input) {
         integrals: protonPred.integrals,
         lineWidth: 1,
         method:
-          'Desplazamientos por códigos HOSE/red neuronal (servicio de predicción de NMRium); espectro simulado como sistema de espín completo (incluye efectos de segundo orden).',
+          prediction?.source === 'local'
+            ? 'Predicción local de respaldo: desplazamientos por entornos tipo HOSE (NMRShiftDB2) y constantes J típicas; espectro simulado como sistema de espín completo.'
+            : 'Desplazamientos por códigos HOSE/red neuronal (servicio de predicción de NMRium); espectro simulado como sistema de espín completo (incluye efectos de segundo orden).',
       },
     });
   }
@@ -523,7 +540,7 @@ export async function analyze(input) {
     spectra.push({
       nucleus: '13C',
       kind: 'predicho',
-      source: 'Predicción (nmr-processing / NMRium)',
+      source: predSource,
       sourceId: '',
       frequency: c13freq,
       solvent,

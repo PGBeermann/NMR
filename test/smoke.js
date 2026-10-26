@@ -62,4 +62,17 @@ const para = concordance(expC, [{ delta: 2.27, n: 3, nb: 0 }, { delta: 7.03, n: 
 assert.ok(ortho.sdOk, `DE orto ${ortho.errorSd}`);
 assert.ok(ortho.score > para.score, `orto ${ortho.score} vs para ${para.score}`);
 
+// Predictor local de respaldo (sólo si la tabla de entornos ya está construida en data/)
+const { hoseReady } = await import('../src/services/hose.js');
+if (hoseReady()) {
+  const { localPrediction } = await import('../src/services/local-prediction.js');
+  const lp = localPrediction(parseMolecule({ smiles: 'CCOC(C)=O' }));
+  const byMult = Object.fromEntries(lp.spectra.proton.joinedSignals.map((s) => [s.multiplicity, s]));
+  assert.ok(byMult.q && Math.abs(byMult.q.delta - 4.1) < 0.2 && byMult.q.nbAtoms === 2, 'OCH2 cuarteto');
+  assert.ok(byMult.t && Math.abs(byMult.t.delta - 1.25) < 0.2 && byMult.t.nbAtoms === 3, 'CH3 triplete');
+  assert.equal(lp.spectra.carbon.joinedSignals.length, 4);
+} else {
+  console.log('(predictor local no construido: se omite su prueba)');
+}
+
 console.log('Todas las pruebas pasaron ✔');
