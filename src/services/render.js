@@ -56,7 +56,7 @@ export function renderUpload(u, { from, to, width, height } = {}) {
   };
   const labels = isH
     ? sig.map((g) => ({ ppm: g.delta, tag: g.label || null, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.from - 0.002, g.to + 0.002) }))
-    : sig.map((g) => ({ ppm: g.delta, text: g.delta.toFixed(1), height: heightAt(g.delta - 0.2, g.delta + 0.2) }));
+    : sig.map((g) => ({ ppm: g.delta, tag: g.label || null, text: g.delta.toFixed(1), height: heightAt(g.delta - 0.2, g.delta + 0.2) }));
   const integrals = isH ? sig.map((g) => ({ from: g.from - 0.004, to: g.to + 0.004, text: `${g.nH}H` })) : [];
   return spectrumSvg({
     width: width || 1100,
@@ -71,6 +71,7 @@ export function renderUpload(u, { from, to, width, height } = {}) {
     integrals,
     integralCurve: isH ? { x: xy.x, y: cumulativeIntegral(xy) } : null,
     marks: [{ ppm: 0, text: 'TMS' }],
+    tagColor: isH ? '#1f4e9c' : '#b05a00',
     color: '#b02a37',
     footer: 'Analizador RMN',
   });
@@ -103,9 +104,9 @@ export function renderSpectrum(s, compound, { from, to, width, height } = {}) {
     integrals = (s.meta?.integrals || []).map((i) => ({ from: i.from, to: i.to, text: `${i.nH}H` }));
     if (xy) integralCurve = { x: xy.x, y: cumulativeIntegral(xy) };
   } else if (s.kind === 'predicho') {
-    labels = s.signals.map((g) => ({ ppm: g.delta, text: `${g.delta.toFixed(1)} ${g.type}`, height: heightAt(g.delta) }));
+    labels = s.signals.map((g) => ({ ppm: g.delta, tag: g.label || null, text: `${g.delta.toFixed(1)} ${g.type}`, height: heightAt(g.delta) }));
   } else {
-    labels = (s.peaks || []).map((p) => ({ ppm: p.ppm, text: p.ppm.toFixed(isH ? 2 : 1), height: heightAt(p.ppm) }));
+    labels = (s.peaks || []).map((p) => ({ ppm: p.ppm, tag: p.label || null, text: p.ppm.toFixed(isH ? 2 : 1), height: heightAt(p.ppm) }));
   }
 
   const marks = [{ ppm: 0, text: 'TMS' }];
@@ -125,6 +126,7 @@ export function renderSpectrum(s, compound, { from, to, width, height } = {}) {
     integrals,
     integralCurve,
     marks,
+    tagColor: isH ? '#1f4e9c' : '#b05a00',
     color: s.kind === 'predicho' ? '#1f4e9c' : s.kind === 'calculado' ? '#8a5a00' : '#b02a37',
     footer: `${compound?.formula || ''}  ·  Analizador RMN`,
   });

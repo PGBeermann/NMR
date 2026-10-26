@@ -407,21 +407,24 @@ function bindExperimentalToggles(root) {
 }
 
 /** Letra de señal resaltada. */
-function letterBadge(l) {
-  return l ? `<span class="sig-letter">${esc(l)}</span>` : '';
+function letterBadge(l, nucleus = '1H') {
+  return l ? `<span class="sig-letter${nucleus === '13C' ? ' c13' : ''}">${esc(l)}</span>` : '';
 }
 
 /**
  * Estructura con las letras de las señales de ¹H junto a los átomos que portan esos H,
  * acompañada de la leyenda letra → desplazamiento.
  */
-function assignmentBlock(svg, signals, title = 'Asignación de los hidrógenos') {
+function assignmentBlock(svg, signals, title = 'Asignación de los hidrógenos', nucleus = '1H') {
   if (!svg || !signals?.some((g) => g.label)) return '';
+  const isC = nucleus === '13C';
   const legend = signals
     .filter((g) => g.label)
     .map(
       (g) =>
-        `<li>${letterBadge(g.label)} <b>δ ${fmt(g.delta, 2)}</b> · ${esc(g.multiplicity || '')}${g.nH ? ` · ${g.nH}H` : ''}${
+        `<li>${letterBadge(g.label, nucleus)} <b>δ ${fmt(g.delta, isC ? 1 : 2)}</b> · ${esc((isC ? g.type : g.multiplicity) || g.type || g.multiplicity || '')}${
+          isC ? (g.nC > 1 ? ` · ${g.nC} C equivalentes` : '') : g.nH ? ` · ${g.nH}H` : ''
+        }${
           g.environment ? ` <span class="muted">— ${esc(g.environment)}</span>` : g.note ? ` <span class="muted">— ${esc(g.note)}</span>` : ''
         }</li>`,
     )
@@ -429,7 +432,7 @@ function assignmentBlock(svg, signals, title = 'Asignación de los hidrógenos')
   return `<div class="assign">
     <div class="assign-mol">${svg}</div>
     <div><h4 style="margin:0 0 6px">${esc(title)}</h4>
-      <p class="hint" style="margin:0 0 6px">Cada letra señala el átomo que porta esos hidrógenos y el pico correspondiente del espectro.</p>
+      <p class="hint" style="margin:0 0 6px">${isC ? 'Cada letra señala el carbono y el pico correspondiente del espectro de ¹³C.' : 'Cada letra señala el átomo que porta esos hidrógenos y el pico correspondiente del espectro.'}</p>
       <ul class="assign-legend">${legend}</ul></div>
   </div>`;
 }
@@ -510,11 +513,13 @@ function renderSpectrum(sp) {
       </tbody></table></div></details>`;
   } else if (sp.kind === 'predicho') {
     const d = sp.analysis.dept;
+    body += assignmentBlock(sp.analysis.assignmentSvg, sp.signals, 'Asignación de los carbonos', '13C');
     body += `<p><b>DEPT:</b> ${d.CH3} CH₃ · ${d.CH2} CH₂ · ${d.CH} CH · ${d.C} C cuaternarios (total ${sp.analysis.totalC} C en ${sp.analysis.environments} señales)</p>
-    <div class="table-wrap"><table><thead><tr><th>δ (ppm)</th><th>Tipo</th><th>DEPT-135</th><th>DEPT-90</th><th>Intensidad</th><th>Átomos</th><th>Entorno / interpretación</th></tr></thead><tbody>
+    <div class="table-wrap"><table><thead><tr><th>Señal</th><th>δ (ppm)</th><th>Tipo</th><th>DEPT-135</th><th>DEPT-90</th><th>Intensidad</th><th>Átomos</th><th>Entorno / interpretación</th></tr></thead><tbody>
     ${sp.signals
       .map(
         (g) => `<tr class="clickable" data-zoom="${sp.id}" data-ppm="${g.delta}" data-width="6">
+      <td>${letterBadge(g.label, '13C')}</td>
       <td class="num"><b>${fmt(g.delta, 1)}</b></td><td>${esc(g.type)}</td><td>${esc(g.dept135)}</td><td>${esc(g.dept90)}</td>
       <td class="num">${fmt(g.intensity, 0)}%</td><td>${g.atoms.map((a) => `C${a}`).join(', ')}</td>
       <td class="explain">${esc(g.explanation)}<br><span class="muted">${esc(g.region)}</span></td></tr>`,
@@ -522,11 +527,14 @@ function renderSpectrum(sp) {
       .join('')}
     </tbody></table></div>`;
   } else if (sp.signals?.length) {
+    const hasLetters = sp.signals.some((g) => g.label);
+    if (sp.meta?.assignmentSvg)
+      body += assignmentBlock(sp.meta.assignmentSvg, sp.signals, sp.nucleus === '13C' ? 'Asignación de los carbonos (datos de la base)' : 'Asignación de los hidrógenos (datos de la base)', sp.nucleus);
     body += `<details ${sp.signals.length <= 30 ? 'open' : ''}><summary>Señales / picos (${sp.signals.length})</summary>
-      <div class="table-wrap"><table><thead><tr><th>δ (ppm)</th><th>Tipo / mult.</th><th>Intensidad</th><th>Átomos</th></tr></thead><tbody>
+      <div class="table-wrap"><table><thead><tr>${hasLetters ? '<th>Señal</th>' : ''}<th>δ (ppm)</th><th>Tipo / mult.</th><th>Intensidad</th><th>Átomos</th></tr></thead><tbody>
       ${sp.signals
         .map(
-          (g) => `<tr class="clickable" data-zoom="${sp.id}" data-ppm="${g.delta}" data-width="${sp.nucleus === '1H' ? 0.4 : 6}"><td class="num">${fmt(g.delta, 2)}</td><td>${esc(g.type || g.multiplicity || '—')}</td>
+          (g) => `<tr class="clickable" data-zoom="${sp.id}" data-ppm="${g.delta}" data-width="${sp.nucleus === '1H' ? 0.4 : 6}">${hasLetters ? `<td>${letterBadge(g.label, sp.nucleus)}</td>` : ''}<td class="num">${fmt(g.delta, 2)}</td><td>${esc(g.type || g.multiplicity || '—')}</td>
           <td class="num">${g.intensity !== undefined ? fmt(g.intensity, 1) : g.count ? `${g.count} át.` : '—'}</td><td>${(g.atoms || []).map((a) => `${a}`).join(', ') || '—'}</td></tr>`,
         )
         .join('')}

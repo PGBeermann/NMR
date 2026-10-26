@@ -7,7 +7,7 @@ Aplicación web en **Node.js** para el análisis de espectros de **RMN-¹H** y *
 1. **Dibujo de la estructura (JSME)**: se dibuja la molécula en el editor JSME y se obtiene:
    - Espectros de ¹H y ¹³C **predichos** y **simulados** como imagen (SVG/PNG), con etiquetas, integrales y curva de integración.
    - Tabla de señales: δ (ppm), multiplicidad, **constantes de acoplamiento J (Hz)** con el H acoplado y el nº de enlaces, integración, átomo asignado, entorno químico, rango típico y explicación (regla n+1).
-   - **Asignación con letras**: cada señal de ¹H recibe una letra (a, b, c…) que aparece en la estructura (junto al átomo que porta esos H), sobre el pico del espectro y en la tabla.
+   - **Asignación con letras**: cada señal de ¹H recibe una letra (a, b, c…) que aparece en la estructura (junto al átomo que porta esos H), sobre el pico del espectro y en la tabla. Lo mismo para ¹³C (letras en naranja sobre cada carbono), también en los espectros de NMRShiftDB2 con asignación y en el modo CSV.
    - ¹³C: tipo de carbono (CH₃/CH₂/CH/C), **DEPT-135 y DEPT-90**, intensidades relativas, interpretación por regiones.
    - Lista de líneas del espectro simulado con **intensidades** relativas (ppm y Hz).
    - Resumen: fórmula, masa, índice de insaturación, grupos funcionales, simetría, formato de publicación.

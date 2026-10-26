@@ -162,7 +162,7 @@ export function spectrumSvg(o) {
       );
       if (it.tag) {
         parts.push(
-          `<text x="${it.lx.toFixed(1)}" y="${(ly - 5).toFixed(1)}" font-size="13" font-weight="bold" fill="#1f4e9c" text-anchor="middle">${esc(it.tag)}</text>`,
+          `<text x="${it.lx.toFixed(1)}" y="${(ly - 5).toFixed(1)}" font-size="13" font-weight="bold" fill="${o.tagColor || '#1f4e9c'}" text-anchor="middle">${esc(it.tag)}</text>`,
         );
       }
     }

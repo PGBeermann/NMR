@@ -235,6 +235,8 @@ export function analyzePeaks(
         solvent: solventShifts.some((s) => Math.abs(s - p.ppm) < 0.3),
       }))
       .filter((s) => !(excludeSolvent && s.solvent));
+    // Letra de cada pico de ¹³C (de mayor a menor δ)
+    signals.forEach((s, i) => (s.label = signalLetter(i)));
     if (signals.some((s) => s.solvent)) notes.push(`Hay señales que coinciden con el disolvente (${solvent}).`);
     notes.push(`Intensidades por área (${areaSource}).`);
     return { nucleus, frequency, signals, notes, areaSource };

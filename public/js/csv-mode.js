@@ -64,7 +64,7 @@ function scoreColor(p) {
 
 function signalRow(u, s, i, isH) {
   if (!isH) {
-    return `<tr><td class="num"><b>${fmt(s.delta, 2)}</b></td><td class="num">${fmt(s.intensity, 1)}</td>
+    return `<tr><td>${letterBadge(s.label, '13C')}</td><td class="num"><b>${fmt(s.delta, 2)}</b></td><td class="num">${fmt(s.intensity, 1)}</td>
       <td class="explain">${esc(s.region)}${s.solvent ? ' <span class="badge calc">disolvente</span>' : ''}</td></tr>`;
   }
   const J = s.J.length ? s.J.join(', ') : s.apparentJ?.length ? `<span class="muted">aparentes: ${s.apparentJ.join(', ')}</span>` : '—';
@@ -91,13 +91,13 @@ function candidateCard(x, k, isH) {
         m.diff === null
           ? `<span class="muted">${esc(m.note || '')}</span>`
           : `${m.diff > 0 ? '+' : ''}${fmt(m.diff, 3)}${m.note ? `<br><span class="muted">${esc(m.note)}</span>` : ''}`;
-      return `<tr><td>${letterBadge(m.label)}</td><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
+      return `<tr><td>${letterBadge(m.label, isH ? '1H' : '13C')}</td><td class="num">${fmt(m.experimental, 2)}</td><td class="num">${cand}</td><td class="num">${diff}</td></tr>`;
     })
     .join('');
   return `<div class="cand">
     <div class="rank">#${k + 1} · ${badges}</div>
     <div class="mol">${x.svg || ''}</div>
-    ${x.labeled ? '<div class="hint" style="text-align:center;margin-top:-4px">Las letras indican el multiplete experimental asignado a los H de cada átomo.</div>' : ''}
+    ${x.labeled ? `<div class="hint" style="text-align:center;margin-top:-4px">${isH ? 'Las letras indican el multiplete experimental asignado a los H de cada átomo.' : 'Las letras indican el pico experimental de ¹³C asignado a cada carbono.'}</div>` : ''}
     <h4>${esc(x.name || x.iupac || x.smiles)}</h4>
     ${x.iupac && x.iupac !== x.name ? `<div class="muted" style="font-size:.8rem">${esc(x.iupac)}</div>` : ''}
     <div class="muted" style="font-size:.8rem">${esc(x.formula || '')}${x.solvent ? ` · espectro en ${esc(x.solvent)}` : ''}</div>
@@ -132,7 +132,7 @@ function renderUploadResult(u) {
   const c = u.candidates || { candidates: [] };
   const head = isH
     ? '<th>Señal</th><th>δ (ppm)</th><th>Intervalo</th><th>Multiplicidad</th><th>J (Hz)</th><th>Líneas</th><th>Área (%)</th><th>nH</th><th>Región</th>'
-    : '<th>δ (ppm)</th><th>Intensidad por área (%)</th><th>Región</th>';
+    : '<th>Señal</th><th>δ (ppm)</th><th>Intensidad por área (%)</th><th>Región</th>';
   const parts = [];
   parts.push(`<section class="panel spectrum experimental">
     <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (CSV)</span>

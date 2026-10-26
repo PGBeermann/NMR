@@ -82,7 +82,9 @@ export const signalLetter = (i) => (i < 26 ? SIGNAL_LETTERS[i] : SIGNAL_LETTERS[
  * Estructura con las letras de las señales de ¹H junto al átomo que porta esos H
  * (p. ej. «a» en el CH₃ cuyo pico es la señal a). `labels`: Map átomo → [letras].
  */
-export function moleculeSvgLabeled(mol, labels, { width = 440, height = 330, id = 'molL' } = {}) {
+export const LETTER_COLORS = { '1H': 'rgb(31,78,156)', '13C': 'rgb(176,90,0)' };
+
+export function moleculeSvgLabeled(mol, labels, { width = 440, height = 330, id = 'molL', color = LETTER_COLORS['1H'] } = {}) {
   const m = mol.getCompactCopy();
   for (const [a, ls] of labels) {
     if (a >= 0 && a < m.getAllAtoms() && ls?.length) m.setAtomCustomLabel(a, `]${[...new Set(ls)].join(',')}`);
@@ -91,7 +93,7 @@ export function moleculeSvgLabeled(mol, labels, { width = 440, height = 330, id 
   // Las letras (minúsculas) se resaltan: negrita, mayor tamaño y color propio
   return svg.replace(/<text([^>]*)>([a-z]{1,2}(?:,[a-z]{1,2})*)<\/text>/g, (all, attrs, txt) => {
     const clean = attrs.replace(/\s(fill|font-size)="[^"]*"/g, '');
-    return `<text${clean} font-size="14" font-weight="bold" fill="rgb(31,78,156)">${txt}</text>`;
+    return `<text${clean} font-size="14" font-weight="bold" fill="${color}">${txt}</text>`;
   });
 }
 

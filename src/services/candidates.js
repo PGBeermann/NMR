@@ -6,7 +6,7 @@
 // del candidato e integración (sólo 1H).
 import { getAllSpectra, getMolfile } from './nmrshiftdb.js';
 import * as pubchem from './pubchem.js';
-import { OCL, atomMapping, moleculeSvg, moleculeSvgLabeled, parseMolecule } from './molecule.js';
+import { LETTER_COLORS, OCL, atomMapping, moleculeSvg, moleculeSvgLabeled, parseMolecule } from './molecule.js';
 import { runPrediction } from './analysis.js';
 import { describeHydrogenCarrier, parseMultiplicity } from './chemistry.js';
 import { getCachedPrediction, setCachedPrediction } from '../db.js';
@@ -321,7 +321,7 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
 function expSignals(analysis) {
   if (analysis.nucleus === '13C') {
     const n = analysis.signals.length;
-    return analysis.signals.map((s) => ({ delta: s.delta, w: 1 / n }));
+    return analysis.signals.map((s) => ({ delta: s.delta, w: 1 / n, label: s.label }));
   }
   return analysis.signals.map((s) => ({
     delta: s.delta,
@@ -698,7 +698,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
       }
       t.labeled = labels.size > 0;
       t.svg = t.labeled
-        ? moleculeSvgLabeled(mol, labels, { width: 260, height: 200, id })
+        ? moleculeSvgLabeled(mol, labels, { width: 260, height: 200, id, color: LETTER_COLORS[nucleus] })
         : moleculeSvg(mol, { width: 240, height: 180, numbers: false, id });
     } catch {
       t.svg = null;

@@ -1,7 +1,7 @@
 // Núcleo del análisis: predicción, interpretación, búsqueda en bases de datos,
 // comparación predicho/experimental y guardado de los espectros.
 import { predict } from 'nmr-processing';
-import { OCL, atomMapping, moleculeInfo, moleculeSvg, moleculeSvgLabeled, parseMolecule, signalLetter } from './molecule.js';
+import { LETTER_COLORS, OCL, atomMapping, moleculeInfo, moleculeSvg, moleculeSvgLabeled, parseMolecule, signalLetter } from './molecule.js';
 import {
   SOLVENTS,
   carbonRegion,
@@ -172,7 +172,8 @@ function protonAnalysis(mol, prediction, frequency) {
 }
 
 /** Estructura con las letras de cada señal de ¹H en el átomo pesado que porta esos H. */
-export function protonAssignmentSvg(mol, signals) {
+/** Estructura con las letras de cada señal (¹H o ¹³C) en los átomos asignados (índices desde 1). */
+export function assignmentSvg(mol, signals, nucleus = '1H') {
   const labels = new Map();
   for (const s of signals) {
     for (const a of s.atoms || []) {
@@ -182,7 +183,7 @@ export function protonAssignmentSvg(mol, signals) {
     }
   }
   try {
-    return moleculeSvgLabeled(mol, labels, { id: `asg${Math.random().toString(36).slice(2, 8)}` });
+    return moleculeSvgLabeled(mol, labels, { id: `asg${Math.random().toString(36).slice(2, 8)}`, color: LETTER_COLORS[nucleus] });
   } catch {
     return null;
   }
@@ -253,6 +254,8 @@ function carbonAnalysis(mol, prediction) {
       (s.typicalRange ? ` Rango típico ${s.typicalRange[0]}–${s.typicalRange[1]} ppm.` : '');
   }
   signals.sort((a, b) => b.delta - a.delta);
+  // Letra de cada señal de carbono (de mayor a menor δ)
+  signals.forEach((s, i) => (s.label = signalLetter(i)));
   return { signals };
 }
 
@@ -378,7 +381,10 @@ function nmrshiftdbSpectra(entries, mol) {
           atoms: g.atoms,
         }))
         .sort((a, b) => b.delta - a.delta);
+      // Con la correspondencia de átomos se puede dibujar la asignación con letras
+      if (mapping) signals.forEach((g, i) => (g.label = signalLetter(i)));
       const peaks = normalizePeaks(signals.map((g) => ({ ppm: g.delta, intensity: g.count })));
+      if (mapping) peaks.forEach((p, i) => (p.label = signals[i]?.label));
       out.push({
         nucleus: s.nucleus,
         kind: s.calculated ? 'calculado' : 'experimental',
@@ -395,6 +401,7 @@ function nmrshiftdbSpectra(entries, mol) {
           program: s.program,
           assignment: s.assignment,
           atomMapping: Boolean(mapping),
+          assignmentSvg: mapping ? assignmentSvg(mol, signals, s.nucleus) : null,
           rawSignals: s.signals,
           mapping,
           note: s.calculated
@@ -541,7 +548,7 @@ export async function analyze(input) {
       analysis: {
         literature: literatureString('1H', frequency, solvent, protonPred.signals),
         // Estructura con las letras de las señales junto a los átomos que portan esos H
-        assignmentSvg: protonAssignmentSvg(mol, protonPred.signals),
+        assignmentSvg: assignmentSvg(mol, protonPred.signals, '1H'),
         environments: hTypes,
         totalH: protonPred.signals.reduce((a, s) => a + s.nH, 0),
         integrationRatio: protonPred.signals.map((s) => s.relativeIntegration).join(' : '),
@@ -567,9 +574,11 @@ export async function analyze(input) {
       frequency: c13freq,
       solvent,
       signals: carbonPred.signals,
-      peaks: carbonPred.signals.map((s) => ({ ppm: s.delta, intensity: s.intensity, type: s.type, atoms: s.atoms })),
+      peaks: carbonPred.signals.map((s) => ({ ppm: s.delta, intensity: s.intensity, type: s.type, atoms: s.atoms, label: s.label })),
       analysis: {
         literature: literatureString('13C', c13freq, solvent, carbonPred.signals),
+        // Estructura con las letras de las señales de ¹³C en los carbonos correspondientes
+        assignmentSvg: assignmentSvg(mol, carbonPred.signals, '13C'),
         environments: carbonPred.signals.length,
         totalC: carbonPred.signals.reduce((a, s) => a + s.nC, 0),
         dept: {
