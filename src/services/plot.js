@@ -52,7 +52,7 @@ export function spectrumSvg(o) {
   const from = o.from;
   const to = o.to;
   const color = o.color || '#1f4e9c';
-  const labelBand = o.labels?.length ? (o.labels.some((l) => l.tag) ? 110 : 92) : 20;
+  const labelBand = o.labels?.length ? (o.labels.some((l) => l.tag) ? 128 : 92) : 20;
   const integralBand = o.integrals?.length ? 30 : 0;
   const m = { l: 36, r: 30, t: 48 + labelBand, b: 52 + integralBand };
   const pw = W - m.l - m.r;
