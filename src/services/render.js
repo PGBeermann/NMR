@@ -34,6 +34,14 @@ export function defaultRange(s, xy) {
 /** Espectro cargado por el usuario (lista de picos CSV). */
 export function uploadXY(u) {
   const isH = u.nucleus === '1H';
+  // JCAMP-DX: curva real (reducida) guardada con el espectro
+  if (u.spectrum?.y?.length > 1) {
+    const { from, to, y } = u.spectrum;
+    const n = y.length;
+    const x = new Float64Array(n);
+    for (let i = 0; i < n; i++) x[i] = from + ((to - from) * i) / (n - 1);
+    return { x, y: Float64Array.from(y) };
+  }
   const ppms = u.peaks.map((p) => p.ppm);
   const from = isH ? Math.floor(Math.min(0, ...ppms) - 0.5) : Math.floor(Math.min(0, ...ppms) - 5);
   const to = isH ? Math.ceil(Math.max(9, ...ppms) + 0.8) : Math.ceil(Math.max(200, ...ppms) + 10);
@@ -45,8 +53,12 @@ export function renderUpload(u, { from, to, width, height } = {}) {
   const xy = uploadXY(u);
   const isH = u.nucleus === '1H';
   const sig = u.analysis?.signals || [];
-  let lo = Number.isFinite(from) ? from : xy.x[0];
-  let hi = Number.isFinite(to) ? to : xy.x[xy.x.length - 1];
+  // Vista inicial: el rango con señales (la curva de un JCAMP-DX suele ser más ancha)
+  const ppms = u.peaks.map((p) => p.ppm);
+  const viewLo = Math.max(xy.x[0], isH ? Math.min(-0.5, Math.min(...ppms) - 0.5) : Math.min(-5, Math.min(...ppms) - 5));
+  const viewHi = Math.min(xy.x[xy.x.length - 1], isH ? Math.max(10, Math.max(...ppms) + 0.8) : Math.max(200, Math.max(...ppms) + 10));
+  let lo = Number.isFinite(from) ? from : viewLo;
+  let hi = Number.isFinite(to) ? to : viewHi;
   if (lo > hi) [lo, hi] = [hi, lo];
   if (hi - lo < 0.01) hi = lo + 0.01;
   const heightAt = (a, b) => {
@@ -57,14 +69,15 @@ export function renderUpload(u, { from, to, width, height } = {}) {
   const labels = isH
     ? sig.map((g) => ({ ppm: g.delta, tag: g.label || null, text: `${g.delta.toFixed(2)} (${g.multiplicity}, ${g.nH}H)`, height: heightAt(g.from - 0.002, g.to + 0.002) }))
     : sig.map((g) => ({ ppm: g.delta, tag: g.label || null, text: g.delta.toFixed(1), height: heightAt(g.delta - 0.2, g.delta + 0.2) }));
-  const integrals = isH ? sig.map((g) => ({ from: g.from - 0.004, to: g.to + 0.004, text: `${g.nH}H` })) : [];
+  // Sin integral para las impurezas menores (se superpondría a la de la señal vecina)
+  const integrals = isH ? sig.filter((g) => !g.minor).map((g) => ({ from: g.from - 0.004, to: g.to + 0.004, text: `${g.nH}H` })) : [];
   return spectrumSvg({
     width: width || 1100,
     height: height || 500,
     from: lo,
     to: hi,
     title: `${NUC[u.nucleus] || u.nucleus} RMN — ${u.name || 'Espectro cargado'}`,
-    subtitle: `Espectro experimental cargado (CSV) · ${u.peaks.length} picos${u.formula ? ` · ${u.formula}` : ''}`,
+    subtitle: `Espectro experimental cargado (${u.analysis?.input?.format || 'CSV'}) · ${u.peaks.length} picos${u.formula ? ` · ${u.formula}` : ''}`,
     info: [u.frequency ? `${u.frequency} MHz` : null, u.solvent].filter(Boolean).join(' · '),
     xy,
     labels,

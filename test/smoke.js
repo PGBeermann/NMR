@@ -62,6 +62,54 @@ const para = concordance(expC, [{ delta: 2.27, n: 3, nb: 0 }, { delta: 7.03, n: 
 assert.ok(ortho.sdOk, `DE orto ${ortho.errorSd}`);
 assert.ok(ortho.score > para.score, `orto ${ortho.score} vs para ${para.score}`);
 
+// JCAMP-DX: decodificación ASDF, conversión Hz → ppm, detección de picos y áreas
+const { decodeLine, parseJcamp, isJcamp } = await import('../src/services/jcamp.js');
+const { pickPeaks } = await import('../src/services/peakpick.js');
+// Ejemplos de la norma: los tres codifican X = 1000 e Y = 1000 2000 2001 2002 2003 2003 2003
+assert.deepEqual(decodeLine('1000 1000 2000 2001 2002 2003 2003 2003').ys, [1000, 2000, 2001, 2002, 2003, 2003, 2003]); // AFFN
+assert.deepEqual(decodeLine('1000A000B000B001B002B003B003B003').ys, [1000, 2000, 2001, 2002, 2003, 2003, 2003]); // SQZ
+assert.deepEqual(decodeLine('1000A000J000JJJ%%').ys, [1000, 2000, 2001, 2002, 2003, 2003, 2003]); // DIF
+assert.deepEqual(decodeLine('1000A000J000JU%T').ys, [1000, 2000, 2001, 2002, 2003, 2003, 2003]); // DIFDUP
+assert.deepEqual(decodeLine('1000+1000+2000-5').ys, [1000, 2000, -5]); // PAC
+assert.ok(isJcamp('##TITLE=x\n##JCAMP-DX=5.01'));
+assert.throws(() => parseJcamp('##TITLE=fid\n##JCAMP-DX=6.0\n##DATA TYPE=NMR FID\n##.OBSERVE NUCLEUS=^1H\n##END='), /FID/);
+const pt = parseJcamp('##TITLE=picos\n##JCAMP-DX=5.01\n##DATA TYPE=NMR PEAK TABLE\n##.OBSERVE NUCLEUS=^13C\n##.OBSERVE FREQUENCY=100\n##XUNITS=HZ\n##PEAK TABLE=(XY..XY)\n17000,50 6050,100\n##END=');
+assert.equal(pt.kind, 'peaks');
+assert.equal(pt.nucleus, '13C');
+assert.ok(Math.abs(pt.peaks[0].ppm - 170) < 1e-9 && Math.abs(pt.peaks[1].ppm - 60.5) < 1e-9);
+
+const jh = parseJcamp(fs.readFileSync(new URL('../public/examples/acetato-de-etilo-1H-400MHz.jdx', import.meta.url), 'latin1'));
+assert.equal(jh.nucleus, '1H');
+assert.equal(jh.frequency, 400.13);
+assert.equal(jh.solvent, 'CDCl3');
+assert.equal(jh.x.length, 32768);
+assert.ok(Math.abs(jh.x[jh.x.length - 1] - 10.5) < 1e-6 && Math.abs(jh.x[0] + 0.5) < 1e-6, 'eje en ppm con .SHIFT REFERENCE');
+const pkH = pickPeaks(jh.x, jh.y, { nucleus: '1H', frequency: jh.frequency, solvent: 'CDCl3' });
+const maxH = Math.max(...pkH.peaks.map((p) => p.height));
+const peaksH = pkH.peaks.map((p) => ({ ppm: p.ppm, intensity: (p.height / maxH) * 100, area: p.area }));
+const aj = analyzePeaks(peaksH, { nucleus: '1H', frequency: jh.frequency, solvent: 'CDCl3', excludeSolvent: true, totalH: 8 });
+assert.deepEqual(
+  aj.signals.map((s) => [s.delta.toFixed(2), s.multiplicity, s.nH]),
+  [
+    ['4.12', 'q', 2],
+    ['2.05', 's', 3],
+    ['1.26', 't', 3],
+  ],
+);
+assert.ok(Math.abs(aj.signals[0].J[0] - 7.1) < 0.15, 'J del cuarteto');
+
+const jc = parseJcamp(fs.readFileSync(new URL('../public/examples/acetato-de-etilo-13C-100MHz.jdx', import.meta.url), 'latin1'));
+assert.equal(jc.nucleus, '13C');
+const pkC = pickPeaks(jc.x, jc.y, { nucleus: '13C', frequency: jc.frequency, solvent: 'CDCl3' });
+const maxC = Math.max(...pkC.peaks.map((p) => p.height));
+const acj = analyzePeaks(pkC.peaks.map((p) => ({ ppm: p.ppm, intensity: (p.height / maxC) * 100, area: p.area })), {
+  nucleus: '13C',
+  frequency: jc.frequency,
+  solvent: 'CDCl3',
+});
+assert.deepEqual(acj.signals.filter((s) => !s.solvent).map((s) => Math.round(s.delta * 10) / 10), [171.1, 60.5, 21, 14.2]);
+assert.equal(acj.signals.filter((s) => s.solvent).length, 3, 'triplete del CDCl3');
+
 // Predictor local de respaldo (sólo si la tabla de entornos ya está construida en data/)
 const { hoseReady } = await import('../src/services/hose.js');
 if (hoseReady()) {

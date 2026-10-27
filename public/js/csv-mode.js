@@ -1,17 +1,62 @@
 /* Modo 4: espectro experimental en CSV → estructuras candidatas con % de concordancia */
 'use strict';
 
-let currentUpload = null; // { id, csv }
+let currentUpload = null; // { id, csv, jcamp }
+let loadedFile = null; // JCAMP-DX cargado: { name, text } (no se vuelca entero en el cuadro de texto)
+
+const looksJcamp = (t) => /^\s*##\s*(TITLE|JCAMP)/im.test(String(t).slice(0, 4000));
+
+function clearLoadedFile() {
+  loadedFile = null;
+  $('#csvText').readOnly = false;
+  $('#csvText').value = '';
+  $('#csvFile').value = '';
+  $('#jcampInfo').classList.add('hidden');
+}
 
 $('#csvFile').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (!f) return;
-  if (f.size > 5e6) return showError('El archivo es demasiado grande (máx. 5 MB).');
-  $('#csvText').value = await f.text();
+  if (f.size > 30e6) return showError('El archivo es demasiado grande (máx. 30 MB).');
+  const text = await f.text();
   if (!$('#csvName').value) $('#csvName').value = f.name.replace(/\.[^.]+$/, '');
+  if (looksJcamp(text)) {
+    loadedFile = { name: f.name, text };
+    const lines = text.split('\n');
+    $('#csvText').value = lines.slice(0, 30).join('\n') + (lines.length > 30 ? `\n… (${lines.length.toLocaleString('es')} líneas)` : '');
+    $('#csvText').readOnly = true;
+    $('#jcampName').textContent = `${f.name} · ${(f.size / 1024).toLocaleString('es', { maximumFractionDigits: 0 })} kB`;
+    $('#jcampInfo').classList.remove('hidden');
+  } else {
+    loadedFile = null;
+    $('#csvText').readOnly = false;
+    $('#csvText').value = text;
+    $('#jcampInfo').classList.add('hidden');
+  }
 });
 
+$('#btnJcampClear').addEventListener('click', clearLoadedFile);
+
+// Ejemplos JCAMP-DX (espectros sintéticos de acetato de etilo)
+for (const id of ['#btnJcampExampleH', '#btnJcampExampleC']) {
+  $(id).addEventListener('click', async (e) => {
+    const name = e.currentTarget.dataset.file;
+    const text = await (await fetch(`examples/${name}`)).text();
+    clearLoadedFile();
+    loadedFile = { name, text };
+    const lines = text.split('\n');
+    $('#csvText').value = lines.slice(0, 30).join('\n') + `\n… (${lines.length.toLocaleString('es')} líneas)`;
+    $('#csvText').readOnly = true;
+    $('#jcampName').textContent = `${name} · ${(text.length / 1024).toLocaleString('es', { maximumFractionDigits: 0 })} kB`;
+    $('#jcampInfo').classList.remove('hidden');
+    $('#csvName').value = `Ejemplo JCAMP-DX: acetato de etilo (${/13C/.test(name) ? '¹³C' : '¹H'})`;
+    $('#csvFormula').value = 'C4H8O2';
+    $('#csvNucleus').value = 'auto';
+  });
+}
+
 $('#btnCsvExample').addEventListener('click', async () => {
+  clearLoadedFile();
   $('#csvText').value = await (await fetch('examples/fenol-cdcl3-400MHz.tsv')).text();
   $('#csvName').value = 'Ejemplo (aromático + OH, CDCl₃, 400 MHz)';
   $('#csvFormula').value = 'C6H6O';
@@ -26,8 +71,10 @@ $('#csvNucleus').addEventListener('change', (e) => {
 });
 
 async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
-  const csv = currentUpload && uploadId ? currentUpload.csv : $('#csvText').value;
-  if (!csv.trim()) return showError('Cargue un archivo o pegue la tabla de picos.');
+  // Al recalcular un JCAMP-DX ya cargado no se reenvía el archivo: el servidor reutiliza sus picos
+  const recalc = Boolean(currentUpload && uploadId);
+  const csv = recalc ? (currentUpload.jcamp ? '' : currentUpload.csv || '') : loadedFile ? loadedFile.text : $('#csvText').value;
+  if (!csv.trim() && !(recalc && currentUpload.jcamp)) return showError('Cargue un archivo (CSV o JCAMP-DX) o pegue la tabla de picos.');
   showLoading('Analizando el espectro y buscando estructuras compatibles (si indicó la fórmula puede tardar hasta un minuto)…');
   $('#results').innerHTML = '';
   $('#uploadView').innerHTML = '';
@@ -49,7 +96,8 @@ async function analyzeCsv({ integrals = null, uploadId = null } = {}) {
       }),
     });
     hideLoading();
-    currentUpload = { id: r.id, csv };
+    const jcamp = r.analysis?.input?.format === 'JCAMP-DX';
+    currentUpload = { id: r.id, csv: jcamp ? '' : csv, jcamp };
     renderUploadResult(r);
     refreshStatus();
     $('#uploadView').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -135,11 +183,18 @@ function renderUploadResult(u) {
     : '<th>Señal</th><th>δ (ppm)</th><th>Intensidad por área (%)</th><th>Región</th>';
   const parts = [];
   parts.push(`<section class="panel spectrum experimental">
-    <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (CSV)</span>
+    <h3>${NUC[u.nucleus]} RMN — ${esc(u.name || 'Espectro cargado')} <span class="badge exp">experimental (${esc(a.input?.format || 'CSV')})</span>
       <button class="small" id="btnCloseUpload" style="margin-left:auto" title="Quitar este espectro de la pantalla (sigue guardado)">Cerrar espectro ✕</button></h3>
     <div class="meta">${u.frequency} MHz (${esc(a.frequencySource || '')}) · ${esc(u.solvent)} · ${u.peaks.length} picos${
       u.formula ? ` · ${esc(u.formula)} (IDH ${a.unsaturation})` : ''
     }</div>
+    ${
+      a.input?.format === 'JCAMP-DX'
+        ? `<div class="meta">Archivo JCAMP-DX${a.input.title ? ` «${esc(a.input.title)}»` : ''}${a.input.origin ? ` · ${esc(a.input.origin)}` : ''} · ${esc(a.input.kind || '')}${
+            a.input.points ? ` · ${a.input.points.toLocaleString('es')} puntos` : ''
+          }${a.input.snr ? ` · S/R ≈ ${a.input.snr.toLocaleString('es')}` : ''} · ${esc(a.input.referencing || '')}</div>`
+        : ''
+    }
     <img class="spec-img" id="img-u${u.id}" src="${u.image}" alt="Espectro cargado">
     <div class="zoom" id="zoom-u${u.id}">
       Zoom (ppm): <input type="number" step="0.1" class="z-from" placeholder="desde"> –
@@ -266,7 +321,10 @@ async function loadUploads() {
     $('#uploadList').querySelectorAll('[data-uview]').forEach((b) =>
       b.addEventListener('click', async () => {
         const u = await api(`/api/uploads/${b.dataset.uview}`);
-        currentUpload = { id: u.id, csv: u.raw };
+        const jcamp = u.analysis?.input?.format === 'JCAMP-DX';
+        clearLoadedFile();
+        currentUpload = { id: u.id, csv: u.raw, jcamp };
+        // Del JCAMP-DX sólo se guardan los picos y la curva reducida (no el archivo)
         $('#csvText').value = u.raw || '';
         $('#csvName').value = u.name || '';
         $('#csvFormula').value = u.formula || '';

@@ -9,6 +9,8 @@ import { SOLVENTS } from '../services/chemistry.js';
 import { renderSpectrum, renderUpload } from '../services/render.js';
 import { analyzePeaks, detectNucleus, interpret, literature, parsePeakCsv } from '../services/peaklist.js';
 import { MIN_SCORE, SD_MAX, findCandidates } from '../services/candidates.js';
+import { isJcamp, parseJcamp } from '../services/jcamp.js';
+import { compactSpectrum, pickPeaks, referenceCheck } from '../services/peakpick.js';
 import { carbonFrequency } from '../services/spectrum.js';
 import { svgToPng } from '../services/plot.js';
 import { toCsv, toJcamp, toJcampPeaks, toXyCsv } from '../services/exporters.js';
@@ -131,13 +133,81 @@ api.post(
   '/spectrum/analyze',
   wrap(async (req, res) => {
     const b = req.body || {};
-    const peaks = parsePeakCsv(b.csv);
-    if (peaks.length > 20000) throw Object.assign(new Error('La tabla tiene demasiados picos (máx. 20 000).'), { status: 400 });
-    const nucleus = b.nucleus === '1H' || b.nucleus === '13C' ? b.nucleus : detectNucleus(peaks);
-    const frequencyFromFile = peaks.frequency || null;
+    const text = typeof b.csv === 'string' ? b.csv : typeof b.text === 'string' ? b.text : '';
+    const userNucleus = b.nucleus === '1H' || b.nucleus === '13C' ? b.nucleus : null;
     const userFreq = Number(b.frequency) || 400;
-    const frequency = nucleus === '1H' ? frequencyFromFile || userFreq : frequencyFromFile || carbonFrequency(userFreq);
-    const solvent = SOLVENTS[b.solvent] ? b.solvent : 'CDCl3';
+    let solvent = SOLVENTS[b.solvent] ? b.solvent : 'CDCl3';
+    let peaks;
+    let nucleus;
+    let frequency;
+    let frequencySource = 'indicada por el usuario';
+    let input = { format: 'CSV' };
+    let spectrum = null;
+    const fileNotes = [];
+    const previous = Number(b.uploadId) ? store.getUpload(Number(b.uploadId)) : null;
+
+    if (!text.trim() && previous?.analysis?.input?.format === 'JCAMP-DX') {
+      // Recalcular un JCAMP-DX ya cargado (p. ej. con los nH corregidos): se reutilizan sus picos
+      peaks = previous.peaks;
+      peaks.areaSource = previous.analysis.areaSource;
+      ({ nucleus, frequency, solvent } = previous);
+      input = previous.analysis.input;
+      spectrum = previous.spectrum;
+      frequencySource = previous.analysis.frequencySource;
+      fileNotes.push(...(input.notes || []));
+    } else if (isJcamp(text)) {
+      const jc = parseJcamp(text, { nucleus: userNucleus });
+      nucleus = jc.nucleus || userNucleus || (jc.kind === 'xy' ? (jc.x[jc.x.length - 1] > 30 ? '13C' : '1H') : detectNucleus(jc.peaks));
+      if (userNucleus && jc.nucleus && userNucleus !== jc.nucleus) fileNotes.push(`El archivo es de ${jc.nucleus}; se ignoró el núcleo elegido (${userNucleus}).`);
+      frequency = jc.frequency || (nucleus === '1H' ? userFreq : carbonFrequency(userFreq));
+      frequencySource = jc.frequency ? 'leída del archivo JCAMP-DX' : 'indicada por el usuario (el archivo no la trae)';
+      if (jc.solvent) solvent = jc.solvent;
+      else if (jc.solventName) fileNotes.push(`Disolvente del archivo no reconocido («${jc.solventName}»); se usó ${solvent}.`);
+      if (jc.otherNuclei?.length) fileNotes.push(`El archivo trae también espectros de ${jc.otherNuclei.join(', ')}; elija el núcleo para analizarlos.`);
+      if (jc.kind === 'peaks') {
+        const max = Math.max(...jc.peaks.map((p) => p.height)) || 1;
+        peaks = jc.peaks
+          .map((p) => ({ ppm: p.ppm, intensity: Math.round((p.height / max) * 1e4) / 100, area: p.width ? p.height * p.width : null, width: p.width }))
+          .sort((p, q) => q.ppm - p.ppm);
+        const withArea = peaks.every((p) => p.area !== null);
+        if (!withArea) peaks.forEach((p) => (p.area = null));
+        peaks.areaSource = withArea ? 'altura × anchura de la tabla de picos del JCAMP-DX' : null;
+        input = { format: 'JCAMP-DX', kind: 'tabla de picos', title: jc.title, origin: jc.origin, referencing: jc.referencing };
+      } else {
+        let pk = pickPeaks(jc.x, jc.y, { nucleus, frequency, solvent });
+        // ¹³C mal referenciado: se corrige el eje con el multiplete del disolvente y se repite la detección
+        const ref = referenceCheck(pk.peaks, { nucleus, solvent, frequency });
+        if (ref) {
+          for (let i = 0; i < jc.x.length; i++) jc.x[i] -= ref.diff;
+          pk = pickPeaks(jc.x, jc.y, { nucleus, frequency, solvent });
+        }
+        const max = Math.max(...pk.peaks.map((p) => p.height)) || 1;
+        peaks = pk.peaks.map((p) => ({ ppm: p.ppm, intensity: Math.round((p.height / max) * 1e4) / 100, area: p.area, width: Math.round(p.width * 100) / 100 }));
+        peaks.areaSource = 'integración de la curva del espectro (JCAMP-DX), entre los mínimos que separan las líneas';
+        spectrum = compactSpectrum(jc.x, pk.corrected, { nucleus, ref: pk.ref });
+        input = {
+          format: 'JCAMP-DX',
+          kind: 'espectro continuo',
+          title: jc.title,
+          origin: jc.origin,
+          referencing: jc.referencing,
+          points: jc.x.length,
+          snr: Math.round(pk.snr),
+          referenceOffset: ref ? Math.round(ref.diff * 100) / 100 : null,
+        };
+        fileNotes.push(...pk.notes);
+        if (ref) fileNotes.push(ref.note);
+      }
+      input.notes = [...fileNotes];
+    } else {
+      peaks = parsePeakCsv(text);
+      nucleus = userNucleus || detectNucleus(peaks);
+      const frequencyFromFile = peaks.frequency || null;
+      frequency = nucleus === '1H' ? frequencyFromFile || userFreq : frequencyFromFile || carbonFrequency(userFreq);
+      if (frequencyFromFile) frequencySource = 'calculada de la columna Hz del archivo';
+    }
+    if (!peaks.length) throw Object.assign(new Error('No se encontraron picos en el espectro.'), { status: 400 });
+    if (peaks.length > 20000) throw Object.assign(new Error('La tabla tiene demasiados picos (máx. 20 000).'), { status: 400 });
     const formula = b.formula && String(b.formula).trim() ? normalizeFormula(b.formula) : null;
     const totalH = formula ? elementCounts(formula).H || 0 : null;
     const analysis = analyzePeaks(peaks, {
@@ -151,11 +221,15 @@ api.post(
     });
     analysis.literature = literature(analysis, solvent);
     analysis.interpretation = interpret(analysis);
-    analysis.frequencySource = frequencyFromFile ? 'calculada de la columna Hz del archivo' : 'indicada por el usuario';
+    analysis.frequencySource = frequencySource;
+    analysis.input = input;
+    if (fileNotes.length) analysis.notes.unshift(...fileNotes);
     if (formula) analysis.unsaturation = unsaturation(formula);
     // DE máxima de los errores de desplazamiento (ppm) y concordancia mínima (%) para mostrar candidatos
     const sdCap = nucleus === '1H' ? 1 : 20;
-    const sdMax = Number(b.sdMax) > 0 ? Math.min(sdCap, Number(b.sdMax)) : SD_MAX[nucleus];
+    let sdMax = Number(b.sdMax) > 0 ? Math.min(sdCap, Number(b.sdMax)) : SD_MAX[nucleus];
+    // Núcleo detectado del archivo (¹³C) con la DE pensada para ¹H: se usa la recomendada para ¹³C
+    if (nucleus === '13C' && userNucleus !== '13C' && sdMax < 0.5) sdMax = SD_MAX['13C'];
     const minScore = Number.isFinite(Number(b.minScore)) && b.minScore !== '' && b.minScore !== null ? Math.max(0, Math.min(100, Number(b.minScore))) : MIN_SCORE;
     const cands = await findCandidates(analysis, { formula, rangeOnly: Boolean(b.rangeOnly), sdMax, minScore });
     const record = {
@@ -164,7 +238,9 @@ api.post(
       frequency,
       solvent,
       formula,
-      raw: String(b.csv).slice(0, 2_000_000),
+      // Del JCAMP-DX se guardan los picos y la curva reducida, no el archivo completo
+      raw: input.format === 'CSV' ? text.slice(0, 2_000_000) : null,
+      spectrum,
       peaks: peaks.map((p) => ({ ppm: p.ppm, intensity: p.intensity, ...(p.area !== null && p.area !== undefined ? { area: p.area } : {}) })),
       analysis,
       candidates: cands,
@@ -174,7 +250,7 @@ api.post(
     else id = store.saveUpload(record);
     store.logSearch('espectro', record.name || `${nucleus} ${peaks.length} picos`, cands.candidates.length);
     const saved = store.getUpload(id);
-    res.json({ ...saved, raw: undefined, image: `/api/uploads/${id}/image.svg` });
+    res.json({ ...saved, raw: undefined, spectrum: undefined, image: `/api/uploads/${id}/image.svg` });
   }),
 );
 
@@ -183,7 +259,7 @@ api.get('/uploads', (req, res) => res.json({ items: store.listUploads() }));
 api.get('/uploads/:id', (req, res) => {
   const u = store.getUpload(Number(req.params.id));
   if (!u) return res.status(404).json({ error: 'No encontrado' });
-  res.json({ ...u, image: `/api/uploads/${u.id}/image.svg` });
+  res.json({ ...u, spectrum: undefined, image: `/api/uploads/${u.id}/image.svg` });
 });
 
 api.delete('/uploads/:id', (req, res) => res.json({ deleted: store.deleteUpload(Number(req.params.id)) }));

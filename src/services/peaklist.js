@@ -158,10 +158,30 @@ function mergeFine(lines, freq, resHz) {
 
 /** Multiplicidad de primer orden a partir de las posiciones de las líneas (Hz). */
 function firstOrder(rawLines, freq, resHz = 2.5) {
-  const lines = mergeFine(rawLines, freq, resHz);
+  const lines = dropInteriorMinor(mergeFine(rawLines, freq, resHz));
   const fine = lines.length < rawLines.length;
   const res = firstOrderPattern(lines, freq);
   return { ...res, fine };
+}
+
+/**
+ * Quita las líneas interiores mucho menores que sus dos vecinas (< 20 %): en un multiplete de
+ * primer orden las líneas interiores nunca son tan pequeñas, así que son artefactos (efectos de
+ * segundo orden, satélites, impurezas) que impedirían reconocer el patrón.
+ */
+function dropInteriorMinor(lines) {
+  const out = [...lines];
+  for (let changed = true; changed && out.length > 2; ) {
+    changed = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      if (out[i].intensity < 0.2 * Math.min(out[i - 1].intensity, out[i + 1].intensity)) {
+        out.splice(i, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 function firstOrderPattern(lines, freq) {
@@ -174,6 +194,12 @@ function firstOrderPattern(lines, freq) {
   const tol = Math.max(0.8, 0.18 * mean);
   const equal = sp.every((s) => Math.abs(s - mean) < tol);
   if (n === 2) return { multiplicity: 'd', J: [r(mean, 1)] };
+  // Cuatro líneas equidistantes: cuarteto (1:3:3:1) o doble doblete con J₁ ≈ 2·J₂ (1:1:1:1)
+  if (equal && n === 4) {
+    const inner = lines[1].intensity + lines[2].intensity;
+    const outer = lines[0].intensity + lines[3].intensity || 1e-9;
+    if (inner / outer < 1.8) return { multiplicity: 'dd', J: [r(sp[0] + sp[1], 1), r(sp[0], 1)] };
+  }
   if (equal && n <= 7) {
     const names = { 3: 't', 4: 'q', 5: 'quint', 6: 'sext', 7: 'sept' };
     return { multiplicity: names[n], J: [r(mean, 1)] };
@@ -226,13 +252,24 @@ export function analyzePeaks(
   if (nucleus === '13C') {
     const areas = fileAreas ? peaks.map((p) => p.area) : estimateAreas(peaks, frequency, widthHz);
     const maxA = Math.max(...areas) || 1;
+    // Multiplete del disolvente deuterado (acoplamiento C–D ≈ 20–32 Hz): además de la línea central,
+    // las líneas vecinas de altura comparable (p. ej. el triplete 1:1:1 del CDCl₃)
+    const isSolvent = (p) => {
+      if (solventShifts.some((s) => Math.abs(s - p.ppm) < 0.3)) return true;
+      for (const s of solventShifts) {
+        const center = peaks.filter((q) => Math.abs(q.ppm - s) < 0.3).sort((a, b) => b.intensity - a.intensity)[0];
+        if (center && Math.abs(p.ppm - center.ppm) < 66 / frequency && p.intensity >= 0.25 * center.intensity && p.intensity <= 1.5 * center.intensity)
+          return true;
+      }
+      return false;
+    };
     const signals = peaks
       .map((p, i) => ({
         delta: r(p.ppm, 2),
         height: p.intensity,
         intensity: r((areas[i] / maxA) * 100, 2),
         region: carbonRegion(p.ppm),
-        solvent: solventShifts.some((s) => Math.abs(s - p.ppm) < 0.3),
+        solvent: isSolvent(p),
       }))
       .filter((s) => !(excludeSolvent && s.solvent));
     // Letra de cada pico de ¹³C (de mayor a menor δ)
@@ -268,7 +305,8 @@ export function analyzePeaks(
       apparentJ: fo.multiplicity === 'm' ? apparentJ(lines, frequency) : fo.J,
       area: sum,
       region: protonRegion(center),
-      solvent: lines.length <= 2 && solventShifts.some((s) => Math.abs(s - center) < 0.01),
+      // Singlete o multiplete estrecho del disolvente residual (p. ej. quintete del DMSO-d5, J ≈ 1.9 Hz)
+      solvent: (lines.length <= 2 || width < 9) && solventShifts.some((s) => Math.abs(s - center) < 0.012),
       lines: lines.map((l, i) => ({ ppm: l.ppm, hz: r(l.ppm * frequency, 2), intensity: l.intensity, area: lineAreas[i] })),
     };
   });
@@ -287,27 +325,47 @@ export function analyzePeaks(
   }
   if (excludeSolvent) signals = signals.filter((s) => !s.solvent);
 
-  // Integración relativa: suma de las áreas de las líneas de cada multiplete
-  const minArea = Math.min(...signals.map((s) => s.area));
-  const totalArea = signals.reduce((a, s) => a + s.area, 0);
+  // Integración relativa: suma de las áreas de las líneas de cada multiplete. Las señales del
+  // disolvente/agua se muestran, pero no entran en el reparto de H ni en la relación entera.
+  const main = signals.filter((s) => !s.solvent);
+  let base = main.length ? main : signals;
+  // Señales menores (impurezas): < 0.3 H con la fórmula, o < 10 % del área mediana sin ella.
+  // Se muestran, pero no reciben H ni se comparan con los candidatos. Sólo con áreas reales (curva o
+  // columna de área): con áreas estimadas por altura una señal ancha (OH) parecería una impureza.
+  if (fileAreas && base.length > 1) {
+    const tot = base.reduce((a, s) => a + s.area, 0) || 1;
+    const sortedA = base.map((s) => s.area).sort((a, b) => a - b);
+    const med = sortedA[sortedA.length >> 1];
+    for (const s of base) if (totalH ? (s.area / tot) * totalH < 0.3 : s.area < 0.1 * med) s.minor = true;
+    const keep = base.filter((s) => !s.minor);
+    if (keep.length) base = keep;
+    else base.forEach((s) => delete s.minor);
+    const minor = signals.filter((s) => s.minor);
+    if (minor.length)
+      notes.push(
+        `Señal(es) menor(es) en δ ${minor.map((s) => s.delta.toFixed(2)).join(', ')} (${totalH ? 'menos de 0.3 H' : 'área muy pequeña'}): probable impureza; no se cuenta en las integrales ni en la comparación con los candidatos.`,
+      );
+  }
+  const minArea = Math.min(...base.map((s) => s.area));
+  const totalArea = base.reduce((a, s) => a + s.area, 0);
   for (const s of signals) {
     s.relativeIntegral = r(s.area / minArea, 2);
     s.fraction = r(s.area / totalArea, 4);
   }
   // Con la fórmula: reparto de los H totales (redondeo de mayor resto, mínimo 1 H por señal)
-  if (totalH && totalH >= signals.length) {
-    const raw = signals.map((s) => s.fraction * totalH);
+  if (totalH && totalH >= base.length) {
+    const raw = base.map((s) => s.fraction * totalH);
     const ints = raw.map((v) => Math.max(1, Math.floor(v)));
     let left = totalH - ints.reduce((a, b) => a + b, 0);
     const order = raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]);
     for (let k = 0; left > 0 && k < order.length * 3; k++, left--) ints[order[k % order.length][1]]++;
-    signals.forEach((s, i) => (s.estimatedH = ints[i]));
+    base.forEach((s, i) => (s.estimatedH = ints[i]));
   }
   // Relación entera aproximada (probando múltiplos 1–4 del menor)
   // Se elige el múltiplo más pequeño cuyo error de redondeo medio sea aceptable (≤ 0.2)
   let best = null;
   for (let k = 1; k <= 4; k++) {
-    const ints = signals.map((s) => s.relativeIntegral * k);
+    const ints = base.map((s) => s.relativeIntegral * k);
     const err = ints.reduce((a, v) => a + Math.abs(v - Math.round(v)), 0) / ints.length;
     const cand = { k, err, ints: ints.map((v) => Math.max(1, Math.round(v))) };
     if (err <= 0.2) {
@@ -316,8 +374,10 @@ export function analyzePeaks(
     }
     if (!best || err < best.err) best = cand;
   }
+  base.forEach((s, i) => (s.integerIntegral = best.ints[i]));
   signals.forEach((s, i) => {
-    s.integerIntegral = best.ints[i];
+    // Disolvente o impureza: nº de H equivalente con un decimal (sólo informativo)
+    if (s.integerIntegral === undefined) s.integerIntegral = Math.max(0.1, r(s.relativeIntegral * best.k, 1));
     // Letra que identifica el multiplete en el espectro, en la tabla y en las estructuras candidatas
     s.label = signalLetter(i);
     s.nH = s.estimatedH ?? s.integerIntegral;
@@ -334,7 +394,7 @@ export function analyzePeaks(
   } else {
     notes.push(
       `Integrales por área: ${areaSource}. Relación aproximada ${best.ints.join(' : ')}${
-        totalH ? `; repartiendo ${totalH} H: ${signals.map((s) => s.estimatedH).join(' : ')}` : ''
+        totalH ? `; repartiendo ${totalH} H: ${base.map((s) => s.estimatedH).join(' : ')}` : ''
       }.${
         fileAreas
           ? ''
@@ -418,7 +478,9 @@ export function interpret(analysis) {
 
 /** Texto en formato de publicación. */
 export function literature(analysis, solvent) {
-  const s = analysis.signals;
+  // Sin las señales del disolvente/agua
+  const own = analysis.signals.filter((x) => !x.solvent && !x.minor);
+  const s = own.length ? own : analysis.signals;
   if (analysis.nucleus === '13C') return `¹³C RMN (${analysis.frequency} MHz, ${solvent}) δ ${s.map((x) => x.delta.toFixed(1)).join(', ')}.`;
   const items = s.map((x) => {
     const J = x.J.length ? `, J = ${x.J.join(', ')} Hz` : '';

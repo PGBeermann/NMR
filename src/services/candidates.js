@@ -319,13 +319,17 @@ export function concordance(exp, cand, nucleus, { rangeOnly = false, totalH = nu
 }
 
 function expSignals(analysis) {
+  // Las señales del disolvente/agua no se comparan con los candidatos
+  const own = analysis.signals.filter((s) => !s.solvent && !s.minor);
+  const sig = own.length ? own : analysis.signals;
   if (analysis.nucleus === '13C') {
-    const n = analysis.signals.length;
-    return analysis.signals.map((s) => ({ delta: s.delta, w: 1 / n, label: s.label }));
+    const n = sig.length;
+    return sig.map((s) => ({ delta: s.delta, w: 1 / n, label: s.label }));
   }
-  return analysis.signals.map((s) => ({
+  const wSum = sig.reduce((a, s) => a + (s.fraction || 0), 0) || 1;
+  return sig.map((s) => ({
     delta: s.delta,
-    w: s.fraction,
+    w: (s.fraction || 0) / wSum,
     mult: s.multiplicity,
     nb: neighborsFromMultiplicity(s.multiplicity),
     label: s.label,
@@ -425,7 +429,7 @@ export async function findCandidates(analysis, { formula = null, rangeOnly = fal
   const sdLimit = Number(sdMax) > 0 ? Number(sdMax) : SD_MAX[nucleus];
   const exp = expSignals(analysis);
   // Sólo cuando el usuario fijó los nH de cada multiplete se compara el nº total de H
-  const expTotalH = nucleus === '1H' && analysis.userIntegrals ? analysis.signals.reduce((a, s) => a + (s.nH || 0), 0) : null;
+  const expTotalH = nucleus === '1H' && analysis.userIntegrals ? analysis.signals.filter((s) => !s.solvent && !s.minor).reduce((a, s) => a + (s.nH || 0), 0) : null;
   const warnings = [];
   const results = [];
   const score = (signals, f, smiles) => {

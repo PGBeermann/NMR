@@ -15,7 +15,10 @@ Aplicación web en **Node.js** para el análisis de espectros de **RMN-¹H** y *
 2. **Fórmula molecular**: lista **todos** los compuestos con esa fórmula en PubChem (nombre común, nombre IUPAC, SMILES, imagen) y marca los que tienen espectros asignados en NMRShiftDB2. Cualquiera se puede analizar con un clic.
 3. **Nombre IUPAC** (o común): se resuelve en PubChem; si no existe, el nombre sistemático se convierte en estructura con OPSIN. Luego se buscan y predicen los espectros.
 
-4. **Espectro experimental (CSV) → estructura**: se carga o pega una tabla de picos (`ppm` e intensidad; opcional una columna `Hz`, con la que se calcula la frecuencia del equipo). El programa:
+4. **Espectro experimental (JCAMP-DX o CSV) → estructura**: se carga un archivo **JCAMP-DX** (`.jdx`, `.dx`) de ¹H o ¹³C, o se carga/pega una tabla de picos (`ppm` e intensidad; opcional una columna `Hz`, con la que se calcula la frecuencia del equipo).
+   - **JCAMP-DX** (TopSpin, MestReNova, Delta, VnmrJ…; versiones 4.24, 5.x y 6.0): lector propio que admite `XYDATA=(X++(Y..Y))` comprimido (ASDF: SQZ, DIF, DUP, PAC) o AFFN, `NTUPLES` de Bruker (parte real), `XYPOINTS` y `PEAK TABLE`. Lee núcleo, frecuencia y disolvente, y convierte el eje a ppm con `.SHIFT REFERENCE` o `$OFFSET`. Sobre la curva corrige la línea base, estima el ruido, detecta los picos (también señales anchas de OH/NH/COOH), descarta satélites de ¹³C y el TMS, y calcula las **integrales por área** integrando la curva. En ¹³C, si el multiplete del disolvente deuterado está desplazado, re-referencia el espectro al disolvente. Las señales del disolvente y las impurezas menores (< 0.3 H) se muestran, pero no reciben H ni se comparan con los candidatos. Se rechazan con un mensaje los FID y los espectros de 2D. Del archivo sólo se guardan los picos y una curva reducida para la imagen. Ejemplos: `public/examples/acetato-de-etilo-1H-400MHz.jdx` y `acetato-de-etilo-13C-100MHz.jdx` (sintéticos).
+
+   Con la lista de picos (de cualquiera de los dos formatos) el programa:
    - agrupa las líneas en multipletes, calcula su centro, la multiplicidad (fusionando la estructura fina < 2.5 Hz), las constantes **J** y la integración relativa **por área** (con la fórmula reparte el nº total de H; el usuario puede corregir los nH y recalcular). El área de cada línea se toma de una columna `Área`/`Integral` del archivo, o se calcula como altura × anchura si hay columna `W½`/`Width`; si sólo hay alturas, se estima con líneas lorentzianas de anchura común y deconvolución de las líneas solapadas;
    - marca las señales del disolvente y propone **fragmentos estructurales** (benceno monosustituido, sustituyente donador/aceptor, OCH₃, acetilo, etilo, isopropilo, OH/NH…);
    - busca **estructuras candidatas** en los ~17 600 espectros de ¹H (o ~58 000 de ¹³C) de NMRShiftDB2 y, si se indica la fórmula, predice los espectros de todos los isómeros de PubChem con esa fórmula (hasta 150) con un **predictor local** (códigos de entorno tipo HOSE construidos a partir de NMRShiftDB2, `data/hose.db`, ~2 min la primera vez) y refina los 3 mejores con el servicio NMRium (que limita el nº de consultas);
@@ -84,7 +87,7 @@ El repositorio incluye `Dockerfile` (y `docker-compose.yml` como alternativa).
 | GET | `/api/compounds` · `/api/compounds/:id` | Guardados |
 | GET | `/api/spectra/:id/image.svg|png?from=&to=` | Imagen del espectro (con zoom) |
 | GET | `/api/spectra/:id/export?format=jdx|jdx-peaks|csv|xy|json` | Exportación |
-| POST | `/api/spectrum/analyze` | `{csv, name, nucleus, frequency, solvent, formula, excludeSolvent, rangeOnly, integrals, sdMax=0.1, minScore=90}` → multipletes, interpretación y candidatos (se guarda) |
+| POST | `/api/spectrum/analyze` | `{csv (texto CSV o JCAMP-DX), name, nucleus, frequency, solvent, formula, excludeSolvent, rangeOnly, integrals, sdMax=0.1, minScore=90}` → multipletes, interpretación y candidatos (se guarda) |
 | GET | `/api/uploads` · `/api/uploads/:id` | Espectros CSV cargados |
 | GET | `/api/uploads/:id/image.svg|png` · `/api/uploads/:id/export?format=csv|json` | Imagen y exportación |
 | GET | `/api/status` | Estado de las bases de datos |
@@ -98,6 +101,8 @@ src/services/chemistry.js  entornos químicos, rangos, multiplicidades, DEPT, di
 src/services/pubchem.js    PubChem (PUG REST / PUG View)
 src/services/nmrshiftdb*.js índice local de NMRShiftDB2
 src/services/plot.js       imágenes SVG/PNG de espectros
+src/services/jcamp.js      lector de JCAMP-DX (ASDF, NTUPLES, PEAK TABLE)
+src/services/peakpick.js   picos, áreas y referencia sobre la curva del espectro
 src/services/exporters.js  JCAMP-DX, CSV
 public/                    interfaz web (JSME)
 ```

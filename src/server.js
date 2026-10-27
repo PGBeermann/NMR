@@ -6,7 +6,7 @@ import * as nmrshiftdb from './services/nmrshiftdb.js';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '30mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 app.use('/api', api);

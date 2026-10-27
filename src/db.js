@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS searches (
 );
 `);
 
+// Migración: curva del espectro cargado (JCAMP-DX), reducida, para dibujarlo
+if (!db.prepare('PRAGMA table_info(uploads)').all().some((c) => c.name === 'spectrum')) db.exec('ALTER TABLE uploads ADD COLUMN spectrum TEXT');
+
 const now = () => new Date().toISOString();
 const j = (v) => (v === undefined ? null : JSON.stringify(v));
 const p = (v) => (v ? JSON.parse(v) : null);
@@ -246,10 +249,10 @@ export function saveUpload(u) {
   const t = now();
   const info = db
     .prepare(
-      `INSERT INTO uploads (name, nucleus, frequency, solvent, formula, raw, peaks, analysis, candidates, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO uploads (name, nucleus, frequency, solvent, formula, raw, peaks, analysis, candidates, spectrum, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(u.name ?? null, u.nucleus, u.frequency ?? null, u.solvent ?? null, u.formula ?? null, u.raw ?? null, j(u.peaks), j(u.analysis), j(u.candidates), t, t);
+    .run(u.name ?? null, u.nucleus, u.frequency ?? null, u.solvent ?? null, u.formula ?? null, u.raw ?? null, j(u.peaks), j(u.analysis), j(u.candidates), j(u.spectrum ?? null), t, t);
   return Number(info.lastInsertRowid);
 }
 export function updateUpload(id, fields) {
@@ -276,6 +279,7 @@ export function getUpload(id) {
     peaks: p(r.peaks),
     analysis: p(r.analysis),
     candidates: p(r.candidates),
+    spectrum: p(r.spectrum),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

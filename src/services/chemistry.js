@@ -181,5 +181,6 @@ export const SOLVENTS = {
   'Acetona-d6': { name: 'Acetona-d₆', H: [2.05], C: [29.84, 206.26], water: 2.84 },
   C6D6: { name: 'Benceno-d₆', H: [7.16], C: [128.06], water: 0.4 },
   CD3CN: { name: 'Acetonitrilo-d₃', H: [1.94], C: [1.32, 118.26], water: 2.13 },
+  CD2Cl2: { name: 'Diclorometano-d₂ (CD₂Cl₂)', H: [5.32], C: [53.84], water: 1.52 },
   ninguno: { name: 'Sin disolvente (solo TMS)', H: [], C: [], water: null },
 };
